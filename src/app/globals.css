@@ -1,0 +1,415 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =====================================================================
+ * MJPremium Ultimate MLM System — plugin theme
+ * Black canvas (#000) · charcoal cards (#111) · gold accent (#F5E121)
+ * ===================================================================== */
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  color: #f4f4f5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+::selection {
+  background: #f5e121;
+  color: #000;
+}
+
+/* scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3d3d3d;
+}
+
+@layer components {
+  /* ---------- surfaces ---------- */
+  .card {
+    @apply rounded-xl border border-line bg-card p-4 shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset];
+  }
+  .card-flat {
+    @apply rounded-xl border border-line bg-card p-4;
+  }
+  .card-hover {
+    @apply transition hover:border-[#4a4a1f] hover:shadow-[0_0_0_1px_rgba(245,225,33,0.15)];
+  }
+  .panel-title {
+    @apply mb-3 flex items-center gap-2 text-[13px] font-bold uppercase tracking-[0.14em] text-gold;
+  }
+  .divider {
+    @apply my-4 border-t border-line;
+  }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-semibold
+           transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-gold {
+    @apply btn bg-gold text-black hover:bg-[#f9ec6a];
+  }
+  .btn-dark {
+    @apply btn border border-line bg-card2 text-zinc-100 hover:border-gold/50 hover:text-gold;
+  }
+  .btn-ghost {
+    @apply btn text-zinc-400 hover:bg-card2 hover:text-gold;
+  }
+  .btn-danger {
+    @apply btn border border-red-900/60 bg-red-950/40 text-red-300 hover:bg-red-900/50 hover:text-red-100;
+  }
+  .btn-ok {
+    @apply btn border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/40;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-[12px];
+  }
+  .btn-xs {
+    @apply px-2 py-1 text-[11px];
+  }
+
+  /* ---------- forms ---------- */
+  .lbl {
+    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-400;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line bg-[#0a0a0a] px-3 py-2 text-[13px] text-zinc-100
+           outline-none transition placeholder:text-zinc-600 focus:border-gold/70 focus:ring-1 focus:ring-gold/30;
+  }
+  .select {
+    @apply input appearance-none pr-8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23a1a1aa'%3E%3Cpath d='M5.5 7.5 10 12l4.5-4.5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1.1rem;
+  }
+  .textarea {
+    @apply input min-h-[90px] resize-y;
+  }
+  .check {
+    @apply h-4 w-4 accent-[#F5E121];
+  }
+  .form-row {
+    @apply grid grid-cols-1 gap-3 sm:grid-cols-2;
+  }
+
+  /* ---------- stats ---------- */
+  .stat {
+    @apply card card-hover flex flex-col gap-1;
+  }
+  .stat-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500;
+  }
+  .stat-value {
+    @apply text-2xl font-extrabold leading-tight text-zinc-50;
+  }
+  .stat-value.gold {
+    @apply text-gold;
+  }
+  .stat-sub {
+    @apply text-[11px] text-zinc-500;
+  }
+
+  /* ---------- tables ---------- */
+  .tbl-wrap {
+    @apply overflow-x-auto rounded-xl border border-line bg-card;
+  }
+  .tbl {
+    @apply w-full min-w-[640px] border-collapse text-left text-[13px];
+  }
+  .tbl thead th {
+    @apply sticky top-0 z-10 whitespace-nowrap border-b border-line bg-[#0d0d0d] px-3 py-2.5
+           text-[11px] font-bold uppercase tracking-[0.1em] text-zinc-400;
+  }
+  .tbl tbody td {
+    @apply whitespace-nowrap border-b border-[#1e1e1e] px-3 py-2 text-zinc-300;
+  }
+  .tbl tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .tbl tbody tr:hover td {
+    @apply bg-[#151515];
+  }
+  .tbl tfoot td {
+    @apply border-t border-line bg-[#0d0d0d] px-3 py-2 text-[12px] font-bold text-gold;
+  }
+
+  /* ---------- badges ---------- */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide;
+  }
+  .badge-gold {
+    @apply badge bg-gold/15 text-gold ring-1 ring-inset ring-gold/30;
+  }
+  .badge-ma {
+    @apply badge bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-500/30;
+  }
+  .badge-ca {
+    @apply badge bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-500/30;
+  }
+  .badge-free {
+    @apply badge bg-zinc-500/15 text-zinc-300 ring-1 ring-inset ring-zinc-500/30;
+  }
+  .badge-ok {
+    @apply badge bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-500/30;
+  }
+  .badge-bad {
+    @apply badge bg-red-500/15 text-red-300 ring-1 ring-inset ring-red-500/30;
+  }
+  .badge-warn {
+    @apply badge bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-500/30;
+  }
+  .badge-info {
+    @apply badge bg-sky-500/15 text-sky-300 ring-1 ring-inset ring-sky-500/30;
+  }
+  .badge-violet {
+    @apply badge bg-violet-500/15 text-violet-300 ring-1 ring-inset ring-violet-500/30;
+  }
+
+  /* ---------- navigation ---------- */
+  .side-link {
+    @apply flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-zinc-400
+           transition hover:bg-[#1a1a1a] hover:text-gold;
+  }
+  .side-link.active {
+    @apply bg-gold/10 text-gold ring-1 ring-inset ring-gold/25;
+  }
+  .tab-btn {
+    @apply whitespace-nowrap rounded-lg px-3 py-2 text-[12px] font-semibold text-zinc-400 transition
+           hover:bg-card2 hover:text-zinc-100;
+  }
+  .tab-btn.active {
+    @apply bg-gold text-black hover:bg-[#f9ec6a] hover:text-black;
+  }
+
+  /* ---------- misc ---------- */
+  .money {
+    @apply font-mono text-[13px] tabular-nums;
+  }
+  .money-pos {
+    @apply money text-emerald-400;
+  }
+  .money-neg {
+    @apply money text-red-400;
+  }
+  .money-gold {
+    @apply money font-bold text-gold;
+  }
+  .kbd {
+    @apply rounded border border-line bg-[#0a0a0a] px-1.5 py-0.5 font-mono text-[11px] text-zinc-400;
+  }
+  .empty {
+    @apply flex flex-col items-center justify-center gap-2 py-10 text-center text-[13px] text-zinc-500;
+  }
+  .spinner {
+    @apply inline-block h-4 w-4 animate-spin rounded-full border-2 border-gold/30 border-t-gold;
+  }
+  .skeleton {
+    @apply animate-pulse rounded-lg bg-[#1a1a1a];
+  }
+  .toast {
+    @apply fixed bottom-5 right-5 z-[100] flex max-w-sm items-start gap-3 rounded-xl border px-4 py-3
+           text-[13px] shadow-2xl backdrop-blur animate-fadeIn;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(245, 225, 33, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(245, 225, 33, 0.045) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .gold-text {
+    background: linear-gradient(92deg, #f5e121 0%, #f9e29c 45%, #f5e121 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+/* =====================================================================
+ * Genealogy tree (port of the plugin's white-card tree renderer)
+ * ===================================================================== */
+.mlm-tree-container {
+  overflow-x: auto;
+  padding: 34px 16px;
+  text-align: center;
+  background: #ffffff;
+  border-radius: 12px;
+  margin-top: 12px;
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-overflow-scrolling: touch;
+}
+.mlm-tree-container ul {
+  display: flex;
+  justify-content: center;
+  padding-top: 34px;
+  list-style: none;
+  padding-left: 0;
+  margin: 0 auto;
+  position: relative;
+  gap: 8px;
+}
+.mlm-tree-container ul ul::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 2px solid #1d4ed8;
+  width: 0;
+  height: 34px;
+}
+.mlm-tree-container li {
+  text-align: center;
+  position: relative;
+  padding: 34px 4px 0 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.mlm-tree-container li::before,
+.mlm-tree-container li::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  border-top: 2px solid #1d4ed8;
+  width: 50%;
+  height: 34px;
+}
+.mlm-tree-container li::after {
+  right: auto;
+  left: 50%;
+  border-left: 2px solid #1d4ed8;
+}
+.mlm-tree-container li:only-child::after,
+.mlm-tree-container li:only-child::before {
+  display: none;
+}
+.mlm-tree-container li:first-child::before,
+.mlm-tree-container li:last-child::after {
+  border: 0 none;
+}
+.mlm-tree-container li:last-child::before {
+  border-right: 2px solid #1d4ed8;
+  border-radius: 0 15px 0 0;
+}
+.mlm-tree-container li:first-child::after {
+  border-radius: 15px 0 0 0;
+}
+.node-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  position: relative;
+  z-index: 2;
+  min-width: 108px;
+}
+.node-lbl-top {
+  color: #000;
+  margin-bottom: 8px;
+  min-height: 38px;
+  line-height: 1.25;
+}
+.node-lbl-top strong.blue-txt {
+  color: #1d4ed8;
+}
+.tree-node-circle {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 50%;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 5;
+}
+.tree-node-circle.ma-node {
+  background-color: #d97706;
+  border: 4px solid #fff;
+  box-shadow: 0 0 0 3px #d97706;
+}
+.tree-node-circle.ma-node::after {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  border: 4px dashed #22c55e;
+  border-radius: 50%;
+}
+.tree-node-circle.rank-premium {
+  background-color: #facc15 !important;
+  box-shadow: 0 0 0 3px #ca8a04 !important;
+}
+.tree-node-circle.rank-premium svg {
+  color: #000 !important;
+}
+.tree-node-circle.rank-starpremium {
+  background-color: #000000 !important;
+  box-shadow: 0 0 0 3px #111827 !important;
+}
+.tree-node-circle.ca-node,
+.tree-node-circle.ca-node.filled {
+  background-color: #1e3a8a !important;
+  border: 4px solid #fff;
+  box-shadow: 0 0 0 3px #1d4ed8 !important;
+}
+@keyframes mjpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@media (max-width: 767px) {
+  .mlm-tree-container {
+    padding: 18px 6px;
+  }
+  .tree-node-circle {
+    width: 56px;
+    height: 56px;
+  }
+  .node-wrap {
+    min-width: 92px;
+  }
+}

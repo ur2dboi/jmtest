@@ -1,0 +1,311 @@
+import { exec, one, q, scalar } from '../db';
+import { phMonthKey } from '../time';
+import { unilevelMatrix } from '../settings';
+import {
+  addToWallet,
+  bumpMonthlyLp,
+  getMonthlyLp,
+  isActiveUnilevel,
+  invalidateUser,
+  isAccountOnHold,
+  isStarterRank,
+  resyncAllWallets,
+  unilevelCutoffHoldOn,
+  unilevelMonthlyResetOn,
+  userById,
+} from './accounts';
+import { insertLedger } from './pairing';
+
+/* =====================================================================
+ * UNILEVEL — DYNAMIC COMPRESSION (v9.6.110)
+ *
+ * Eligibility = ">= 5 product units (LP)" in the current month (or lifetime
+ * when the monthly-reset switch is OFF).
+ *
+ * Level rule (SPONSOR chain, not the placement tree):
+ *   - A product activation pays the activator's direct sponsor chain upward.
+ *   - CA1/CA2/CA3 are connector nodes only: skipped, never a paid level.
+ *   - Ineligible / Starter uplines are COMPRESSED OUT and do not consume a
+ *     paid tier, so the next eligible upline takes the next tier (L1..L10).
+ * ===================================================================== */
+
+export interface UnilevelUpline {
+  level: number;
+  account_id: number;
+  user_id: number;
+}
+
+export async function getStructuralUnilevelUplines(
+  buyerUserId: number,
+  maxLevels = 100,
+): Promise<UnilevelUpline[]> {
+  const uplines: UnilevelUpline[] = [];
+  if (Number(buyerUserId) <= 0) return uplines;
+
+  let currentUserId = Number(buyerUserId);
+  const seen = new Set<number>([currentUserId]);
+  let safety = 0;
+
+  while (uplines.length < maxLevels && safety++ < 300) {
+    const currentAcc = await one<{ id: number; user_id: number; sponsor_id: number; account_type: string }>(
+      `SELECT id, user_id, sponsor_id, account_type FROM accounts
+       WHERE user_id = $1 AND status = 1
+       ORDER BY CASE WHEN account_type = 'MA' THEN 0 ELSE 1 END, id ASC LIMIT 1`,
+      [currentUserId],
+    );
+    if (!currentAcc) break;
+
+    let candidate = Number(currentAcc.sponsor_id);
+    if (candidate <= 0) break;
+
+    let connectorSafety = 0;
+    let added = false;
+
+    while (candidate > 0 && connectorSafety++ < 20) {
+      if (seen.has(candidate)) {
+        candidate = 0;
+        break;
+      }
+      const candidateMa = await one<{ id: number; user_id: number; sponsor_id: number }>(
+        `SELECT id, user_id, sponsor_id FROM accounts
+         WHERE user_id = $1 AND account_type = 'MA' AND status = 1 ORDER BY id ASC LIMIT 1`,
+        [candidate],
+      );
+      if (candidateMa) {
+        uplines.push({
+          level: uplines.length + 1,
+          account_id: Number(candidateMa.id),
+          user_id: Number(candidateMa.user_id),
+        });
+        seen.add(candidate);
+        currentUserId = candidate;
+        added = true;
+        break;
+      }
+      // No MA for this user: if it is a CA connector, hop to its owner/sponsor
+      // WITHOUT consuming a unilevel level.
+      const candidateCa = await one<{ id: number; user_id: number; sponsor_id: number }>(
+        `SELECT id, user_id, sponsor_id FROM accounts
+         WHERE user_id = $1 AND account_type = 'CA' AND status = 1 ORDER BY id ASC LIMIT 1`,
+        [candidate],
+      );
+      if (candidateCa && Number(candidateCa.sponsor_id) > 0) {
+        seen.add(candidate);
+        candidate = Number(candidateCa.sponsor_id);
+        continue;
+      }
+      candidate = 0;
+      break;
+    }
+
+    if (!added) break;
+  }
+
+  return uplines;
+}
+
+export async function processUnilevelCommission(
+  buyerUserId: number,
+  qty = 1,
+  eventTime?: Date | string | null,
+): Promise<number> {
+  const buyer = Number(buyerUserId);
+  const amount = Math.max(1, Number(qty) || 1);
+  const when = eventTime ? new Date(eventTime) : new Date();
+
+  const buyerRow = await userById(buyer);
+  if (!buyerRow) return 0;
+  if (isStarterRank(buyerRow.rank)) return 0; // Starter accounts are excluded
+
+  const matrix = unilevelMatrix();
+  const uplines = await getStructuralUnilevelUplines(buyer, 100);
+  const maxPaidTiers = 10;
+  let paidTier = 0;
+  let paid = 0;
+
+  for (const upline of uplines) {
+    if (paidTier >= maxPaidTiers) break;
+    const sponsorId = Number(upline.user_id);
+    if (sponsorId <= 0) continue;
+
+    const sponsor = await userById(sponsorId);
+    if (!sponsor) continue;
+    if (isAccountOnHold(sponsor)) continue; // paused recipients do not receive
+    if (isStarterRank(sponsor.rank)) continue; // compressed out, no tier consumed
+    if (!(await isActiveUnilevel(sponsorId))) continue; // < 5 LP, compressed out
+
+    paidTier++;
+    const commPerBottle = matrix[paidTier - 1] ?? 0;
+    if (commPerBottle <= 0) continue;
+    const total = commPerBottle * amount;
+
+    const holdUntilCutoff = unilevelCutoffHoldOn();
+    await insertLedger({
+      user_id: sponsorId,
+      amount: total,
+      type: 'cash',
+      status: holdUntilCutoff ? 'hang' : 'active',
+      note:
+        `Unilevel Comm (Compressed Level ${paidTier} | Structural Level ${upline.level} | Qty: ${amount})` +
+        (holdUntilCutoff ? ' - Pending Cutoff' : ''),
+      created_at: when,
+    });
+    if (!holdUntilCutoff) await addToWallet(sponsorId, total);
+    paid++;
+  }
+  return paid;
+}
+
+/** Release last month's held unilevel commissions once the cutoff passes. */
+export async function releaseMaturedUnilevelCommissions(): Promise<number> {
+  if (!unilevelCutoffHoldOn()) return 0;
+  const currentPeriod = phMonthKey();
+
+  const rows = await q<{ user_id: number; total: string }>(
+    `SELECT user_id, COALESCE(SUM(amount),0)::text AS total
+     FROM ledger
+     WHERE note LIKE '%Unilevel Comm%' AND type = 'cash' AND status = 'hang'
+       AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') < $1
+     GROUP BY user_id`,
+    [currentPeriod],
+  );
+
+  const released: number[] = [];
+  for (const r of rows) {
+    const uid = Number(r.user_id);
+    const amt = Number(r.total);
+    if (uid <= 0 || amt <= 0) continue;
+    const u = await userById(uid);
+    if (isAccountOnHold(u)) continue;
+    await addToWallet(uid, amt);
+    released.push(uid);
+  }
+  if (released.length) {
+    await exec(
+      `UPDATE ledger SET status = 'released'
+       WHERE user_id = ANY($1::bigint[]) AND note LIKE '%Unilevel Comm%'
+         AND type = 'cash' AND status = 'hang'
+         AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') < $2`,
+      [released, currentPeriod],
+    );
+  }
+  return released.length;
+}
+
+/** Rebuild unilevel rows from used product pins (scope-aware). */
+export async function rebuildUnilevelCommissionsScope(currentPeriodOnly?: boolean): Promise<number> {
+  const periodScoped = currentPeriodOnly ?? unilevelMonthlyResetOn();
+  let count = 0;
+
+  if (periodScoped) {
+    const period = phMonthKey();
+    await exec(
+      `DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%'
+         AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $1`,
+      [period],
+    );
+    const rows = await q<{ activator_id: number; event_date: string; qty: string }>(
+      `SELECT COALESCE(used_by, purchaser_id) AS activator_id,
+              to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS event_date,
+              COUNT(*)::text AS qty
+       FROM pins
+       WHERE is_product = 1 AND status = 'used'
+         AND to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $1
+       GROUP BY activator_id, event_date`,
+      [period],
+    );
+    for (const r of rows) {
+      await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`);
+      count += Number(r.qty);
+    }
+  } else {
+    await exec(`DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%'`);
+    const rows = await q<{ activator_id: number; event_date: string; qty: string }>(
+      `SELECT COALESCE(used_by, purchaser_id) AS activator_id,
+              to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS event_date,
+              COUNT(*)::text AS qty
+       FROM pins
+       WHERE is_product = 1 AND status = 'used'
+       GROUP BY activator_id, event_date`,
+    );
+    for (const r of rows) {
+      await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`);
+      count += Number(r.qty);
+    }
+  }
+
+  await releaseMaturedUnilevelCommissions();
+  await resyncAllWallets();
+  return count;
+}
+
+/**
+ * Product activation entry point. If a member crosses the 5-LP threshold
+ * AFTER downlines already activated products, their previously skipped
+ * commissions are caught up with a scoped rebuild.
+ */
+export async function handleProductActivationUnilevel(activatorId: number, qty = 1): Promise<void> {
+  const id = Number(activatorId);
+  const amount = Math.max(1, Number(qty) || 1);
+  if (id <= 0) return;
+  const oldLp = await getMonthlyLp(id);
+  const newLp = await bumpMonthlyLp(id, amount);
+  if (oldLp < 5 && newLp >= 5) await rebuildUnilevelCommissionsScope(unilevelMonthlyResetOn());
+  else await processUnilevelCommission(id, amount);
+}
+
+/**
+ * mlm_mark_product_pin_used() — records status, recipient, activation source
+ * (member/admin) and the actor who performed the activation. Does NOT trigger
+ * unilevel; the caller decides.
+ */
+export async function markProductPinUsed(
+  pinId: number,
+  usedByUserId: number,
+  source: 'member' | 'admin' = 'member',
+  activatedByUserId = 0,
+): Promise<boolean> {
+  const id = Number(pinId);
+  const usedBy = Number(usedByUserId);
+  const src = source === 'admin' ? 'admin' : 'member';
+  let actor = Number(activatedByUserId);
+  if (src === 'member' && actor <= 0) actor = usedBy;
+  if (id <= 0 || usedBy <= 0) return false;
+
+  const affected = await exec(
+    `UPDATE pins SET status = 'used', used_by = $1, used_at = now(),
+        activation_source = $2, activated_by_user_id = NULLIF($3, 0)
+     WHERE id = $4`,
+    [usedBy, src, actor, id],
+  );
+  invalidateUser(usedBy);
+  return affected > 0;
+}
+
+/** LP contribution summary used by admin alerts + member dashboards. */
+export async function unilevelEligibilitySnapshot(userId: number): Promise<{
+  lp: number;
+  eligible: boolean;
+  period: string;
+  mode: 'monthly' | 'lifetime';
+}> {
+  const { getUnilevelLp } = await import('./accounts');
+  const lp = await getUnilevelLp(userId);
+  return {
+    lp,
+    eligible: lp >= 5,
+    period: phMonthKey(),
+    mode: unilevelMonthlyResetOn() ? 'monthly' : 'lifetime',
+  };
+}
+
+export async function usedProductPinCount(userId: number): Promise<number> {
+  return Number(
+    (await scalar<string>(
+      `SELECT COUNT(*) FROM pins WHERE is_product = 1 AND status = 'used' AND COALESCE(used_by, purchaser_id) = $1`,
+      [userId],
+    )) ?? 0,
+  );
+}
+
+

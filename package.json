@@ -1,0 +1,39 @@
+{
+  "name": "mjpremium-mlm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MJPremium Ultimate MLM System - Next.js port of the WordPress plugin (strict manual placement MA->CA->MA, hybrid point/node pairing, CA separation, admin gateway, dynamic compression unilevel, advanced reporting).",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "db:push": "node scripts/db-push.mjs",
+    "db:seed": "tsx scripts/db-seed.mts",
+    "db:reset": "node scripts/db-push.mjs --fresh && tsx scripts/db-seed.mts"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.6",
+    "next": "^15.1.6",
+    "pg": "^8.13.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.17.10",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
