@@ -8,6 +8,7 @@ import type { PackageRow, UserRow } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 
 /**
  * POST /api/register — public registration wizard (mlm_register_form).

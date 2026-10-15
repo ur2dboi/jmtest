@@ -11,6 +11,7 @@ import type { UserRow } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 
 /**
  * POST /api/auth/login  { username, password, mode?: 'member' | 'admin' }

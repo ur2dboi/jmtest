@@ -5,6 +5,7 @@ import { buildReportRows } from '@/lib/queries';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 
 /**
  * GET /api/admin/export?report=sales&format=csv&start=YYYY-MM-DD&end=YYYY-MM-DD

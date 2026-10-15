@@ -6,6 +6,7 @@ import { phFormat } from '@/lib/time';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 
 /** GET /api/admin/backup — full JSON backup download. */
 export async function GET() {

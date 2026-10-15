@@ -45,19 +45,34 @@ export interface EarningsBreakdown {
 
 export async function earningsFor(userId: number): Promise<EarningsBreakdown> {
   const uid = Number(userId);
-  const sum = async (sql: string, params: unknown[] = []) =>
-    num((await scalar<string>(sql, [uid, ...params])) ?? 0);
-
-  const dr = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Direct Referral%' AND type='cash'`);
-  const pairingReleased = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%A+B%' AND type='cash' AND status='released'`);
-  const pairingHang = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%A+B%' AND type='cash' AND status='hang'`);
-  const tri = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Tri-Leg%' AND type='cash'`);
-  const unilevel = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status<>'hang'`);
-  const unilevelPendingCutoff = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status='hang'`);
-  const gc = Math.trunc(await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND type='gc'`));
-  const pendingEncash = await sum(`SELECT COALESCE(SUM(ABS(amount)),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Encashment%' AND note LIKE '%Pending%' AND note NOT LIKE '%REJECTED%' AND note NOT LIKE '%APPROVED%'`);
-  const totalEncashed = await sum(`SELECT COALESCE(SUM(ABS(amount)),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Encashment%' AND (note LIKE '%APPROVED%' OR note LIKE '%APPROVED & PAID%') AND note NOT LIKE '%REJECTED%'`);
-
+  // Single aggregate pass over the member's ledger (was 9 sequential sums).
+  const agg = await one<{
+    dr: string; pairing_released: string; pairing_hang: string; tri: string;
+    unilevel: string; unilevel_pending: string; gc: string;
+    pending_encash: string; total_encashed: string;
+  }>(
+    `SELECT
+       COALESCE(SUM(CASE WHEN note LIKE '%Direct Referral%' AND type='cash' THEN amount ELSE 0 END),0)::text AS dr,
+       COALESCE(SUM(CASE WHEN note LIKE '%A+B%' AND type='cash' AND status='released' THEN amount ELSE 0 END),0)::text AS pairing_released,
+       COALESCE(SUM(CASE WHEN note LIKE '%A+B%' AND type='cash' AND status='hang' THEN amount ELSE 0 END),0)::text AS pairing_hang,
+       COALESCE(SUM(CASE WHEN note LIKE '%Tri-Leg%' AND type='cash' THEN amount ELSE 0 END),0)::text AS tri,
+       COALESCE(SUM(CASE WHEN (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status<>'hang' THEN amount ELSE 0 END),0)::text AS unilevel,
+       COALESCE(SUM(CASE WHEN (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status='hang' THEN amount ELSE 0 END),0)::text AS unilevel_pending,
+       COALESCE(SUM(CASE WHEN type='gc' THEN amount ELSE 0 END),0)::text AS gc,
+       COALESCE(SUM(CASE WHEN note LIKE '%Encashment%' AND note LIKE '%Pending%' AND note NOT LIKE '%REJECTED%' AND note NOT LIKE '%APPROVED%' THEN ABS(amount) ELSE 0 END),0)::text AS pending_encash,
+       COALESCE(SUM(CASE WHEN note LIKE '%Encashment%' AND (note LIKE '%APPROVED%' OR note LIKE '%APPROVED & PAID%') AND note NOT LIKE '%REJECTED%' THEN ABS(amount) ELSE 0 END),0)::text AS total_encashed
+     FROM ledger WHERE user_id = $1`,
+    [uid],
+  );
+  const dr = num(agg?.dr);
+  const pairingReleased = num(agg?.pairing_released);
+  const pairingHang = num(agg?.pairing_hang);
+  const tri = num(agg?.tri);
+  const unilevel = num(agg?.unilevel);
+  const unilevelPendingCutoff = num(agg?.unilevel_pending);
+  const gc = Math.trunc(num(agg?.gc));
+  const pendingEncash = num(agg?.pending_encash);
+  const totalEncashed = num(agg?.total_encashed);
   const totalEarned = dr + pairingReleased + tri + unilevel;
   const user = await userById(uid);
   return {
@@ -394,18 +409,16 @@ export async function adminOverview(): Promise<AdminOverview> {
   let payTotal = 0;
   let payUncashed = 0;
   let payFloating = 0;
-  const ledgerUsers = await q<{ user_id: number }>('SELECT DISTINCT user_id FROM ledger');
+  const ledgerUsers = await q<{ user_id: number; earned: string; deducted: string }>(
+    `SELECT user_id,
+            COALESCE(SUM(CASE WHEN amount>0 AND type='cash' AND status<>'hang' AND note NOT LIKE '%Encashment%' THEN amount ELSE 0 END),0)::text AS earned,
+            COALESCE(SUM(CASE WHEN amount<0 THEN ABS(amount) ELSE 0 END),0)::text AS deducted
+     FROM ledger GROUP BY user_id`,
+  );
   for (const r of ledgerUsers) {
     const uid = Number(r.user_id);
-    const earned = num(
-      (await scalar<string>(
-        `SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND amount>0 AND type='cash' AND status<>'hang' AND note NOT LIKE '%Encashment%'`,
-        [uid],
-      )) ?? 0,
-    );
-    const deducted = num(
-      (await scalar<string>(`SELECT COALESCE(SUM(ABS(amount)),0) FROM ledger WHERE user_id=$1 AND amount < 0`, [uid])) ?? 0,
-    );
+    const earned = num(r.earned);
+    const deducted = num(r.deducted);
     const available = Math.max(0, earned - deducted);
     if (available <= 0) continue;
     const u = await userById(uid);
@@ -564,28 +577,22 @@ export async function detectEarningAlerts(): Promise<AdminAlert[]> {
     });
   }
 
-  // Wallet mismatch (sampled over ledger users to keep this fast)
-  const uids = await q<{ user_id: number }>('SELECT DISTINCT user_id FROM ledger');
+  // Wallet mismatch — one grouped pass over the ledger joined to users.
+  const walletRows = await q<{ username: string; wallet: string; earned: string; withdrawn: string }>(
+    `SELECT u.username,
+            COALESCE(u.wallet_balance,0)::text AS wallet,
+            COALESCE(SUM(CASE WHEN l.amount>0 AND l.type='cash' AND l.status<>'hang' AND l.note NOT LIKE '%Encashment%' THEN l.amount ELSE 0 END),0)::text AS earned,
+            COALESCE(SUM(CASE WHEN l.amount<0 THEN ABS(l.amount) ELSE 0 END),0)::text AS withdrawn
+     FROM ledger l JOIN users u ON u.id = l.user_id
+     GROUP BY u.id, u.username, u.wallet_balance`,
+  );
   let mismatches = 0;
   const examples: string[] = [];
-  for (const r of uids) {
-    const uid = Number(r.user_id);
-    if (uid <= 0) continue;
-    const u = await userById(uid);
-    if (!u) continue;
-    const earned = num(
-      (await scalar<string>(
-        `SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND type='cash' AND amount>0 AND status<>'hang' AND note NOT LIKE '%Encashment%'`,
-        [uid],
-      )) ?? 0,
-    );
-    const withdrawn = num(
-      (await scalar<string>(`SELECT COALESCE(SUM(ABS(amount)),0) FROM ledger WHERE user_id=$1 AND amount < 0`, [uid])) ?? 0,
-    );
-    const expected = Math.max(0, earned - withdrawn);
-    if (Math.abs(num(u.wallet_balance) - expected) > 0.05) {
+  for (const r of walletRows) {
+    const expected = Math.max(0, num(r.earned) - num(r.withdrawn));
+    if (Math.abs(num(r.wallet) - expected) > 0.05) {
       mismatches++;
-      if (examples.length < 5) examples.push(`@${u.username} wallet ${num(u.wallet_balance).toFixed(2)} vs ledger ${expected.toFixed(2)}`);
+      if (examples.length < 5) examples.push(`@${r.username} wallet ${num(r.wallet).toFixed(2)} vs ledger ${expected.toFixed(2)}`);
     }
   }
   if (mismatches > 0) {
@@ -970,9 +977,14 @@ export async function genealogyPayload(
     );
     const depthOf = new Map<number, number>();
     for (const [depth, atDepth] of Object.entries(levels)) for (const id of atDepth) depthOf.set(id, Number(depth));
+    const optUserIds = [...new Set(rows.filter((r) => r.account_type === 'MA').map((r) => Number(r.user_id)))];
+    const optUsers = optUserIds.length
+      ? await q<UserRow>('SELECT * FROM users WHERE id = ANY($1::bigint[])', [optUserIds])
+      : [];
+    const optUserById = new Map(optUsers.map((u) => [Number(u.id), u]));
     for (const r of rows) {
       if (r.account_type !== 'MA') continue;
-      const u = await userById(Number(r.user_id));
+      const u = optUserById.get(Number(r.user_id));
       if (!u) continue;
       options.push({
         account_id: Number(r.id),
@@ -1009,42 +1021,74 @@ export async function downlineEarningsTable(ownerAccountId: number) {
     gc: number;
     total: number;
   }[] = [];
-  const seen = new Set<number>();
-  let grand = 0;
+
+  // Collect candidate account ids by depth, then batch-load accounts,
+  // users and ledger aggregates (was 7+ queries PER downline member).
+  const depthOf = new Map<number, number>();
+  const accountIds: number[] = [];
   for (const [depth, ids] of Object.entries(levels)) {
     if (Number(depth) === 0) continue;
-    for (const id of ids) {
-      const acc = await accountById(id);
-      if (!acc || isCA(acc.account_type)) continue;
-      const uid = Number(acc.user_id);
-      if (seen.has(uid)) continue;
-      seen.add(uid);
-      const u = await userById(uid);
-      if (!u) continue;
-      const s = async (sql: string) => num((await scalar<string>(sql, [uid])) ?? 0);
-      const dr = await s(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Direct Referral%' AND type='cash'`);
-      const pairing = await s(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND type='cash' AND note LIKE '%A+B Pair%' AND note NOT LIKE '%Flush Out%'`);
-      const tri = await s(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Tri-Leg Release%' AND type='cash'`);
-      const unilevel = await s(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Unilevel%'`);
-      const gc = Math.trunc(await s(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND type='gc'`));
-      const total = dr + pairing + tri + unilevel;
-      grand += total;
-      rows.push({
-        account_id: id,
-        user_id: uid,
-        username: u.username,
-        name: u.display_name || u.username,
-        rank: u.rank,
-        depth: Number(depth),
-        joined: phFormat(u.created_at, 'Y-m-d'),
-        dr,
-        pairing,
-        tri,
-        unilevel,
-        gc,
-        total,
-      });
-    }
+    for (const id of ids) { depthOf.set(Number(id), Number(depth)); accountIds.push(Number(id)); }
+  }
+  if (!accountIds.length) return { rows, grand: 0 };
+
+  const accs = await q<AccountRow>('SELECT * FROM accounts WHERE id = ANY($1::bigint[])', [accountIds]);
+  const accById = new Map(accs.map((a) => [Number(a.id), a]));
+  const userIds: number[] = [];
+  for (const id of accountIds) {
+    const acc = accById.get(id);
+    if (acc && !isCA(acc.account_type)) userIds.push(Number(acc.user_id));
+  }
+  const uniqUserIds = [...new Set(userIds)];
+  const users = uniqUserIds.length ? await q<UserRow>('SELECT * FROM users WHERE id = ANY($1::bigint[])', [uniqUserIds]) : [];
+  const userByIdMap = new Map(users.map((u) => [Number(u.id), u]));
+  const sums = uniqUserIds.length
+    ? await q<{ user_id: number; dr: string; pairing: string; tri: string; unilevel: string; gc: string }>(
+        `SELECT user_id,
+                COALESCE(SUM(CASE WHEN note LIKE '%Direct Referral%' AND type='cash' THEN amount ELSE 0 END),0)::text AS dr,
+                COALESCE(SUM(CASE WHEN type='cash' AND note LIKE '%A+B Pair%' AND note NOT LIKE '%Flush Out%' THEN amount ELSE 0 END),0)::text AS pairing,
+                COALESCE(SUM(CASE WHEN note LIKE '%Tri-Leg Release%' AND type='cash' THEN amount ELSE 0 END),0)::text AS tri,
+                COALESCE(SUM(CASE WHEN note LIKE '%Unilevel%' THEN amount ELSE 0 END),0)::text AS unilevel,
+                COALESCE(SUM(CASE WHEN type='gc' THEN amount ELSE 0 END),0)::text AS gc
+         FROM ledger WHERE user_id = ANY($1::bigint[]) GROUP BY user_id`,
+        [uniqUserIds],
+      )
+    : [];
+  const sumByUser = new Map(sums.map((s) => [Number(s.user_id), s]));
+
+  const seen = new Set<number>();
+  let grand = 0;
+  for (const id of accountIds) {
+    const acc = accById.get(id);
+    if (!acc || isCA(acc.account_type)) continue;
+    const uid = Number(acc.user_id);
+    if (seen.has(uid)) continue;
+    seen.add(uid);
+    const u = userByIdMap.get(uid);
+    if (!u) continue;
+    const s = sumByUser.get(uid);
+    const dr = num(s?.dr);
+    const pairing = num(s?.pairing);
+    const tri = num(s?.tri);
+    const unilevel = num(s?.unilevel);
+    const gc = Math.trunc(num(s?.gc));
+    const total = dr + pairing + tri + unilevel;
+    grand += total;
+    rows.push({
+      account_id: id,
+      user_id: uid,
+      username: u.username,
+      name: u.display_name || u.username,
+      rank: u.rank,
+      depth: depthOf.get(id) ?? 0,
+      joined: phFormat(u.created_at, 'Y-m-d'),
+      dr,
+      pairing,
+      tri,
+      unilevel,
+      gc,
+      total,
+    });
   }
   return { rows, grand };
 }

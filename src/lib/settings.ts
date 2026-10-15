@@ -116,7 +116,7 @@ export function settingBool(key: SettingKey, fallback?: boolean): boolean {
 export async function saveSettings(values: Record<string, string | number | boolean>): Promise<void> {
   const entries = Object.entries(values);
   if (!entries.length) return;
-  const placeholders = entries.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(',');
+  const placeholders = entries.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2}, now())`).join(',');
   await q(
     `INSERT INTO settings (key, value, updated_at) VALUES ${placeholders}
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,

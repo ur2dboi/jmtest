@@ -29,6 +29,7 @@ import { restoreBackup } from '@/lib/backup';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 export const maxDuration = 300;
 
 /** POST /api/admin { action, ... } — port of the admin command center handlers. */
@@ -347,6 +348,7 @@ export async function POST(req: Request) {
         'mlm_sys_tri_premium', 'mlm_sys_limit_premium', 'mlm_sys_limit_starpremium',
         'mlm_sys_limit_ca_premium', 'mlm_sys_limit_ca_starpremium', 'mlm_sys_gc_every',
         'mlm_sys_max_depth', 'mlm_sys_tax', 'mlm_sys_fee', 'mlm_sys_fund_transfer_fee', 'mlm_sys_min_encash',
+        'mlm_sys_product_comm_starter',
       ];
       const out: Record<string, string> = {};
       for (const k of numKeys) if (v[k] !== undefined) out[k] = String(Number(v[k]) || 0);

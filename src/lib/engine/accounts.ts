@@ -309,10 +309,34 @@ export async function subtreeByDepth(rootId: number, maxDepth = 25): Promise<Rec
 }
 
 export async function liveDownlineCount(accountId: number): Promise<number> {
-  const levels = await subtreeByDepth(Number(accountId), 40);
-  let count = 0;
-  for (const [depth, ids] of Object.entries(levels)) if (Number(depth) > 0) count += ids.length;
-  return count;
+  const n = await scalar<string>(
+    `WITH RECURSIVE t AS (
+       SELECT id FROM accounts WHERE upline_id = $1
+       UNION ALL
+       SELECT c.id FROM accounts c JOIN t ON c.upline_id = t.id
+     ) SELECT COUNT(*)::text FROM t`,
+    [Number(accountId)],
+  );
+  return Number(n ?? 0);
+}
+
+/** Batched descendant counts for many accounts in ONE recursive query. */
+export async function downlineCounts(accountIds: number[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const ids = [...new Set(accountIds.map(Number).filter((n) => n > 0))];
+  if (!ids.length) return out;
+  const rows = await q<{ root_id: string; n: string }>(
+    `WITH RECURSIVE t AS (
+       SELECT id AS root_id, id, 0 AS depth FROM accounts WHERE id = ANY($1::bigint[])
+       UNION ALL
+       SELECT t.root_id, c.id, t.depth + 1 FROM accounts c JOIN t ON c.upline_id = t.id WHERE t.depth < 60
+     )
+     SELECT root_id::text, (COUNT(*) - 1)::text AS n FROM t GROUP BY root_id`,
+    [ids],
+  );
+  for (const id of ids) out.set(id, 0);
+  for (const r of rows) out.set(Number(r.root_id), Number(r.n));
+  return out;
 }
 
 export async function isAccountDescendant(rootId: number, targetId: number, includeSelf = true): Promise<boolean> {

@@ -14,6 +14,7 @@ import MemberPortal from '@/components/MemberPortal';
 import PendingActivation from '@/components/PendingActivation';
 
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 
 const serial = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 

@@ -25,9 +25,10 @@ import { listEncashments } from '@/lib/engine/encash';
 import { getTreeCells } from '@/lib/engine/tree';
 import AdminDashboard, { type MemberDirRow } from '@/components/AdminDashboard';
 import LoginForm from '@/components/LoginForm';
-import type { AuditRow, OrderRow, PackageRow, PinRow, UserRow } from '@/lib/types';
+import type { AccountRow, AuditRow, OrderRow, PackageRow, PinRow, UserRow } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 
 const serial = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
@@ -76,14 +77,25 @@ export default async function AdminDashboardPage({
     loose: await cnt(`SELECT COUNT(*) FROM pins WHERE is_product=1 AND status='unused' AND purchaser_id > 1`),
   };
 
-  // Member directory
+  // Member directory — primary accounts batch-loaded for all members at once
   const allUsers = await q<UserRow>('SELECT * FROM users ORDER BY created_at DESC');
+  const allUserIds = allUsers.map((u) => Number(u.id));
+  const primaryRows = allUserIds.length
+    ? await q<AccountRow>(
+        `SELECT DISTINCT ON (user_id) * FROM accounts
+         WHERE user_id = ANY($1::bigint[])
+         ORDER BY user_id, CASE WHEN account_type = 'MA' THEN 0 ELSE 1 END, id ASC`,
+        [allUserIds],
+      )
+    : [];
+  const primaryByUser = new Map(primaryRows.map((a) => [Number(a.user_id), a]));
+  const usersById = new Map(allUsers.map((u) => [Number(u.id), u]));
   const members: MemberDirRow[] = [];
   for (const u of allUsers) {
-    const primary = await primaryAccountForUser(Number(u.id));
+    const primary = primaryByUser.get(Number(u.id)) ?? null;
     const free = isFreeAccountUser(u);
     const kind = primary ? (isCA(primary.account_type) ? 'Child' : 'Mother') : 'Mother';
-    const sponsor = u.sponsor_id ? await userById(Number(u.sponsor_id)) : null;
+    const sponsor = u.sponsor_id ? usersById.get(Number(u.sponsor_id)) ?? null : null;
     const idStatus = await memberIdStatus(Number(u.id));
     members.push({
       user: u,

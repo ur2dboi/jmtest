@@ -12,6 +12,7 @@ import {
   primaryAccountForUser,
   setAccountDepth,
   userById,
+  downlineCounts,
 } from './accounts';
 import { evaluatePairsCascade, finalizeNewAccountStructure } from './pairing';
 import { rSlotLabel, validateStructurePlacement, getSpilloverPlacement, firstRowsComplete } from './placement';
@@ -112,7 +113,7 @@ async function toCell(row: RawCell): Promise<TreeCell> {
     status: Number(row.status),
     held: !!row.account_held,
     free: !!row.is_free_account,
-    slot: (await rSlotLabel(Number(row.upline_id), row.position)) || '',
+    slot: '', // filled in batch by getTreeCells; nodeCell computes its own
     downline: 0,
     registered_at: row.registered_at,
     children: { L: null, C: null, R: null },
@@ -134,8 +135,26 @@ export async function getTreeCells(rootAccountId: number, levels = 2): Promise<T
 
   const root = cells.get(Number(rows[0].id)) ?? null;
   if (root) {
-    for (const cell of cells.values()) {
-      cell.downline = await liveDownlineCount(cell.id);
+    // One batched descendant-count query for every visible cell.
+    const counts = await downlineCounts([...cells.keys()]);
+    for (const cell of cells.values()) cell.downline = counts.get(cell.id) ?? 0;
+    // CA slot labels (R1..R9) computed from the rows already in memory;
+    // only the root's parent (outside the subtree) may need a DB lookup.
+    const rowsById = new Map(rows.map((r) => [Number(r.id), r]));
+    for (const r of rows) {
+      const cell = cells.get(Number(r.id));
+      if (!cell) continue;
+      const parent = rowsById.get(Number(r.upline_id));
+      if (parent) {
+        if (isCA(parent.account_type)) {
+          const caIdx: Record<string, number> = { L: 0, C: 1, R: 2 };
+          const slotIdx: Record<string, number> = { L: 1, C: 2, R: 3 };
+          const rNum = (caIdx[String(parent.position).toUpperCase()] ?? 0) * 3 + (slotIdx[String(r.position).toUpperCase()] ?? 0);
+          cell.slot = rNum >= 1 && rNum <= 9 ? `R${rNum}` : '';
+        }
+      } else if (Number(r.upline_id) > 0) {
+        cell.slot = (await rSlotLabel(Number(r.upline_id), r.position)) || '';
+      }
     }
   }
   return root;
@@ -156,6 +175,7 @@ export async function nodeCell(accountId: number): Promise<TreeCell | null> {
   );
   if (!row) return null;
   const cell = await toCell(row);
+  cell.slot = (await rSlotLabel(Number(row.upline_id), row.position)) || '';
   cell.downline = await liveDownlineCount(cell.id);
   return cell;
 }

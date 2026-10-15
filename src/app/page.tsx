@@ -3,6 +3,7 @@ import { q } from '@/lib/db';
 import type { PackageRow } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const preferredRegion = 'sin1'; // run beside the Supabase (ap-southeast-1) database
 
 const peso = (v: number | string) =>
   `₱${(Number(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
