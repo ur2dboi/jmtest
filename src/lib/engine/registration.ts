@@ -12,6 +12,7 @@ import {
   isCA,
   isFreeAccountUser,
   isMA,
+  invalidateUser,
   isStarterRank,
   maAccountForUser,
   memberDisplayRank,
@@ -581,6 +582,7 @@ export async function upgradeRank(
   }
 
   await exec('UPDATE users SET rank = $1 WHERE id = $2', [to, Number(userId)]);
+  invalidateUser(Number(userId)); // portal must show the new rank immediately after reload
   await addRankHistory(Number(userId), from, to);
   const accounts = await q<{ id: number }>('SELECT id FROM accounts WHERE user_id = $1', [Number(userId)]);
   for (const a of accounts) await setAccountRankSnapshot(Number(a.id), to);
