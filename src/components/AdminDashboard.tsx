@@ -355,9 +355,9 @@ function CatalogTab({ items, isProduct, post, busy }: { items: PackageRow[]; isP
         <p className="text-[12px] text-zinc-500">{isProduct ? 'Loose retail products that members can order. They do not trigger registration.' : 'Packages used for new user registrations and upgrades.'}</p>
         <div className="tbl-wrap mt-3">
           <table className="tbl">
-            <thead><tr><th>ID</th><th>{isProduct ? 'Product' : 'Package'} Name</th><th>Price (₱)</th><th>Description</th><th>Variants</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>ID</th><th>{isProduct ? 'Product' : 'Package'} Name</th><th>Price (₱)</th><th>Description</th><th>Variants</th><th>Status</th><th>Date Created</th><th>Actions</th></tr></thead>
             <tbody>
-              {items.length === 0 && <tr><td colSpan={7} className="text-center text-zinc-500">None created.</td></tr>}
+              {items.length === 0 && <tr><td colSpan={8} className="text-center text-zinc-500">None created.</td></tr>}
               {items.map((p) => (
                 <tr key={p.id}>
                   <td className="text-zinc-500">{p.id}</td>
@@ -366,6 +366,7 @@ function CatalogTab({ items, isProduct, post, busy }: { items: PackageRow[]; isP
                   <td className="!whitespace-normal text-[12px]">{p.pkg_desc}</td>
                   <td className="!whitespace-normal whitespace-pre-wrap text-[11px] text-zinc-400">{p.pkg_variants}</td>
                   <td>{Number(p.status) === 1 ? <span className="text-emerald-400">Active</span> : <span className="text-red-400">Inactive</span>}</td>
+                  <td className="text-zinc-500">{p.created_at ? dt(p.created_at) : '—'}</td>
                   <td>
                     <div className="flex gap-1">
                       <button type="button" className="btn-dark btn-xs" onClick={() => openEdit(p)}>Edit</button>
@@ -487,7 +488,7 @@ function PinsTab({ entries, summary, isProduct, items, post, busy }: {
                 <td>{p.purchaser_id ? `#${p.purchaser_id}` : 'Admin'}</td>
                 <td>{p.used_by ? `#${p.used_by}` : p.status === 'used' ? 'Unknown' : '-'}</td>
                 <td>{p.status === 'unused' ? <Badge tone="warn">unused</Badge> : p.status === 'used' ? <Badge tone="ok">used</Badge> : <Badge tone="info">{p.status}</Badge>}</td>
-                <td className="text-zinc-500">{dt(p.created_at)}</td>
+                <td className="text-zinc-500">{p.created_at ? dt(p.created_at) : '—'}</td>
                 <td className="text-zinc-500">{p.used_at ? dt(p.used_at) : '-'}</td>
                 <td>
                   <div className="flex gap-1">
@@ -1162,6 +1163,7 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
   const v = props.settingsValues;
   const [f, setF] = React.useState<Record<string, string>>({
     dr_starter: v.mlm_sys_dr_starter ?? '50', dr_premium: v.mlm_sys_dr_premium ?? '300', dr_star: v.mlm_sys_dr_starpremium ?? '1000',
+    starter_prod_comm: v.mlm_sys_product_comm_starter ?? '20',
     bp_amount: v.mlm_sys_bp_amount ?? '200', tri_premium: v.mlm_sys_tri_premium ?? '300',
     lim_premium: v.mlm_sys_limit_premium ?? '15', lim_star: v.mlm_sys_limit_starpremium ?? '30',
     lim_ca_premium: v.mlm_sys_limit_ca_premium ?? '10', lim_ca_star: v.mlm_sys_limit_ca_starpremium ?? '20',
@@ -1223,6 +1225,7 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
               action: 'settings-save',
               values: {
                 mlm_sys_dr_starter: f.dr_starter, mlm_sys_dr_premium: f.dr_premium, mlm_sys_dr_starpremium: f.dr_star,
+                mlm_sys_product_comm_starter: f.starter_prod_comm,
                 mlm_sys_bp_amount: f.bp_amount, mlm_sys_tri_premium: f.tri_premium,
                 mlm_sys_limit_premium: f.lim_premium, mlm_sys_limit_starpremium: f.lim_star,
                 mlm_sys_limit_ca_premium: f.lim_ca_premium, mlm_sys_limit_ca_starpremium: f.lim_ca_star,
@@ -1238,12 +1241,14 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-line bg-[#0a0a0a] p-4">
               <h4 className="text-[14px] font-bold text-gold">🎁 Direct Referral Bonus</h4>
-              <p className="text-[11px] text-zinc-500">Credited to the DIRECT SPONSOR ONLY. Starter sponsors earn 0. Starter package gives DR only and no pairing points.</p>
+              <p className="text-[11px] text-zinc-500">Credited to the DIRECT SPONSOR ONLY. Any pairing involving a Starter pays the flat Starter DR: Starter sponsor → Starter/Premium/StarPremium = ₱50, and Premium/StarPremium sponsor → Starter = ₱50. Starter accounts earn no pairing points until they upgrade to Premium/StarPremium (upgrade pays no DR).</p>
               <div className="mt-2 space-y-2">
-                {numField('Starter Package DR (₱)', 'dr_starter')}
+                {numField('Starter DR — any Starter pairing (₱)', 'dr_starter')}
                 {numField('Premium Package DR (₱)', 'dr_premium')}
                 {numField('StarPremium Package DR (₱)', 'dr_star')}
+                {numField('Starter Repeat-Order Product Comm (₱/bottle)', 'starter_prod_comm')}
               </div>
+              <p className="text-[11px] text-zinc-500">Product Comm: a Premium/StarPremium member earns this per bottle on direct Starter repeat orders, only after meeting the 5 LP maintenance requirement. Credited monthly together with Unilevel.</p>
             </div>
             <div className="rounded-lg border border-line bg-[#0a0a0a] p-4">
               <h4 className="text-[14px] font-bold text-gold">📋 Pairing Bonuses</h4>
@@ -1396,7 +1401,7 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
 function InstructionsTab() {
   const sections: [string, string[]][] = [
     ['1. Account Types & Packages', [
-      'Starter / ₱388: Direct referral only. No pairing points, no A+B, no Tri-Leg, no GC, no unilevel.',
+      'Starter / ₱388: ₱50 Direct Referral on any sponsored package (Starter, Premium or StarPremium). No pairing points, no A+B, no Tri-Leg, no GC, no unilevel — until upgraded to Premium or StarPremium, when pairing points start counting (no DR on the upgrade itself).',
       'Premium: 1 point on A/B side; normal A+B and Tri-Leg participation.',
       'StarPremium: 3 points on A/B side; may receive two ₱300 Tri-Leg units when paired with a StarPremium right-source.',
       'Mother Account (MA): a normal member node that can build genealogy. A Free Mother Account uses the same structure and spillover, with earning restrictions set by Admin.',
@@ -1426,7 +1431,8 @@ function InstructionsTab() {
       'Every Nth Tri-Leg unit gives 1 GC instead of cash. Daily limits: MA 15/30, CA 10/20 (GC included). Reset 12:01 AM PH time.',
     ]],
     ['6. Direct Referral & Unilevel', [
-      'Direct Referral is paid only to the direct sponsor, never to the upline chain. Starter sponsors earn 0.',
+      'Direct Referral is paid only to the direct sponsor, never to the upline chain. Any pairing involving a Starter pays ₱50 (Starter→any package, Premium/StarPremium→Starter).',
+      'Starter Product Commission: Premium/StarPremium members earn ₱20 per bottle on direct Starter repeat orders, credited monthly with Unilevel once the earner meets the 5 LP maintenance requirement.',
       'Unilevel uses Dynamic Compression: CA connector nodes and ineligible/Starter uplines are skipped without consuming a paid tier; 10 paid tiers max.',
       'Recipient must qualify with ≥5 LP in the current month (or lifetime when monthly reset is OFF). Only ACTIVATED (used) product codes create LP.',
       'With Cutoff Hold ON, unilevel is visible immediately but withdrawable only after the monthly cutoff.',

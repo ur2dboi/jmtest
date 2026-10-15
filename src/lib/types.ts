@@ -110,6 +110,7 @@ export interface PackageRow {
   pkg_variants: string;
   is_product: number;
   status: number;
+  created_at: Date | string;
 }
 
 export interface AuditRow {

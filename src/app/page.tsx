@@ -18,7 +18,7 @@ async function loadPackages(): Promise<{ pkgs: PackageRow[]; prods: PackageRow[]
 }
 
 const FALLBACK_PKGS = [
-  { name: 'Starter', price: 388, desc: 'Entry package — Direct Referral earnings only.', perks: ['Direct Referral ₱50', 'Member portal access', 'Upgrade anytime'] },
+  { name: 'Starter', price: 388, desc: 'Entry package — ₱50 Direct Referral on any package you sponsor.', perks: ['Direct Referral ₱50 (any package)', 'Member portal access', 'Upgrade to Premium/StarPremium anytime'] },
   { name: 'Premium', price: 3598, desc: 'The full compensation plan for builders.', perks: ['A+B Pairing ₱200/pt', 'Tri-Leg ₱300/unit', 'Unilevel up to 10 levels', 'Direct Referral ₱300'] },
   { name: 'StarPremium', price: 8998, desc: 'Maximum points and double Tri-Leg units.', perks: ['3 A+B points per member', '2× Tri-Leg units', 'Higher daily limits (30/day)', 'Direct Referral ₱1,000'] },
 ];
@@ -117,7 +117,7 @@ export default async function HomePage() {
           <h2 className="text-center text-3xl font-extrabold">The <span className="gold-text">Compensation Plan</span></h2>
           <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {[
-              ['🎁', 'Direct Referral Bonus', 'Paid to your direct sponsor only — never diluted up the chain. ₱50 (Starter) · ₱300 (Premium) · ₱1,000 (StarPremium), capped by sponsor rank.'],
+              ['🎁', 'Direct Referral Bonus', 'Paid to your direct sponsor only — never diluted up the chain. Any pairing involving a Starter pays ₱50; Premium ₱300 · StarPremium ₱1,000, capped by sponsor rank. Premium/StarPremium members also earn ₱20/bottle on direct Starter repeat orders (5 LP maintenance applies, paid monthly with Unilevel).'],
               ['⚖️', 'A+B Pairing Bonus', 'Premium = 1 point, StarPremium = 3 points on the A/B legs. Every matched point pays ₱200. Unmatched strong-leg points stay waiting — no total flush-out.'],
               ['🎟️', 'GC Every 5th Pair', 'Every 5th A+B pair and every 5th Tri-Leg unit awards 1 Gift Certificate instead of cash. GCs count inside the daily limits.'],
               ['🔺', 'Tri-Leg Bonus', 'Completed A+B triggers plus right-leg members release ₱300 per unit. StarPremium receiver + StarPremium source = ₱300 + ₱300.'],

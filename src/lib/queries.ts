@@ -52,8 +52,8 @@ export async function earningsFor(userId: number): Promise<EarningsBreakdown> {
   const pairingReleased = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%A+B%' AND type='cash' AND status='released'`);
   const pairingHang = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%A+B%' AND type='cash' AND status='hang'`);
   const tri = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Tri-Leg%' AND type='cash'`);
-  const unilevel = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Unilevel%' AND status<>'hang'`);
-  const unilevelPendingCutoff = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Unilevel%' AND status='hang'`);
+  const unilevel = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status<>'hang'`);
+  const unilevelPendingCutoff = await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status='hang'`);
   const gc = Math.trunc(await sum(`SELECT COALESCE(SUM(amount),0) FROM ledger WHERE user_id=$1 AND type='gc'`));
   const pendingEncash = await sum(`SELECT COALESCE(SUM(ABS(amount)),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Encashment%' AND note LIKE '%Pending%' AND note NOT LIKE '%REJECTED%' AND note NOT LIKE '%APPROVED%'`);
   const totalEncashed = await sum(`SELECT COALESCE(SUM(ABS(amount)),0) FROM ledger WHERE user_id=$1 AND note LIKE '%Encashment%' AND (note LIKE '%APPROVED%' OR note LIKE '%APPROVED & PAID%') AND note NOT LIKE '%REJECTED%'`);
@@ -205,8 +205,8 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
   const ledger = await q<LedgerRow>(
     `SELECT * FROM ledger WHERE user_id=$1
        AND ((amount > 0 AND type='cash' AND status<>'hang') OR type='gc' OR (type='hang' AND status='hang')
-            OR (note LIKE '%Unilevel%' AND status='hang') OR note LIKE '%Flush Out%')
-       AND note NOT LIKE '%Encashment%' AND note NOT LIKE '%Refund%' AND note NOT LIKE '%Product Comm%'
+            OR ((note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status='hang') OR note LIKE '%Flush Out%')
+       AND note NOT LIKE '%Encashment%' AND note NOT LIKE '%Refund%'
      ORDER BY created_at DESC, id DESC LIMIT 500`,
     [ledgerUserId],
   );
@@ -450,7 +450,7 @@ export async function adminOverview(): Promise<AdminOverview> {
 export async function leaderboards(start: string, end: string) {
   const earners = await q<{ user_id: number; total: string }>(
     `SELECT user_id,
-            (COALESCE(SUM(CASE WHEN amount>0 AND type='cash' AND status<>'hang' AND note NOT LIKE '%Refund%' AND note NOT LIKE '%Product Comm%' THEN amount ELSE 0 END),0)
+            (COALESCE(SUM(CASE WHEN amount>0 AND type='cash' AND status<>'hang' AND note NOT LIKE '%Refund%' THEN amount ELSE 0 END),0)
              + COALESCE(SUM(CASE WHEN type='hang' AND status='hang' THEN amount ELSE 0 END),0))::text AS total
      FROM ledger WHERE created_at::date >= $1::date AND created_at::date <= $2::date
      GROUP BY user_id ORDER BY total DESC LIMIT 10`,

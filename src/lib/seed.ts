@@ -22,7 +22,7 @@ export interface SeedOptions {
 }
 
 const PACKAGES: [string, number, string, number][] = [
-  ['Starter', 388, 'Entry package — Direct Referral earnings only (no pairing points).', 0],
+  ['Starter', 388, 'Entry package — ₱50 Direct Referral on any package sponsored (Starter/Premium/StarPremium), upgradeable to Premium or StarPremium. No pairing points until upgraded.', 0],
   ['Premium', 3598, 'Full compensation: 1 A+B point, Tri-Leg, Unilevel, DR ₱300.', 0],
   ['StarPremium', 8998, 'Top tier: 3 A+B points, 2× Tri-Leg units with StarPremium sources, DR ₱1000.', 0],
   ['Primo Parfum', 350, 'Retail product — activation counts 1 LP toward Unilevel eligibility.', 1],

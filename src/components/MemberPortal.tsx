@@ -384,7 +384,7 @@ const FILTER_TERMS: Record<string, string[]> = {
   Pairing: ['a+b', 'pairing bonus'],
   'Trifinity Pair': ['tri-leg'],
   'Direct Referral': ['direct referral'],
-  Unilevel: ['unilevel'],
+  Unilevel: ['unilevel', 'product comm'],
   GC: ['gc'],
   Flush: ['flush out', 'exceeded daily limit'],
 };

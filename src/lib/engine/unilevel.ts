@@ -1,6 +1,6 @@
 import { exec, one, q, scalar } from '../db';
 import { phMonthKey } from '../time';
-import { unilevelMatrix } from '../settings';
+import { settingNum, unilevelMatrix } from '../settings';
 import {
   addToWallet,
   bumpMonthlyLp,
@@ -104,6 +104,48 @@ export async function getStructuralUnilevelUplines(
   return uplines;
 }
 
+/**
+ * Starter Product Commission — flat ₱20 per bottle (setting
+ * `mlm_sys_product_comm_starter`) paid to the DIRECT sponsor of a Starter
+ * buyer on that Starter's repeat product orders. The sponsor must be
+ * Premium/StarPremium AND meet the 5-LP maintenance requirement
+ * (isActiveUnilevel). Credited exactly like Unilevel: held until the
+ * monthly cutoff when Cutoff Hold is ON, otherwise straight to wallet.
+ * Returns 1 when a commission was credited, else 0.
+ */
+async function payStarterDirectProductComm(
+  buyerRow: { id: number; sponsor_id?: number | null },
+  qty: number,
+  when: Date,
+): Promise<number> {
+  const sponsorId = Number(buyerRow.sponsor_id ?? 0);
+  if (sponsorId <= 0) return 0;
+  const sponsor = await userById(sponsorId);
+  if (!sponsor || isAccountOnHold(sponsor)) return 0;
+  const sponsorRank = String(sponsor.rank ?? '').replace(/\s+/g, '').toLowerCase();
+  // Premium AND StarPremium both contain "premium" once spaces are removed;
+  // Starter (or anything else) never qualifies.
+  if (!sponsorRank.includes('premium')) return 0;
+  if (!(await isActiveUnilevel(sponsorId))) return 0; // 5 LP maintenance gate
+
+  const perBottle = settingNum('mlm_sys_product_comm_starter', 20);
+  if (perBottle <= 0) return 0;
+  const total = perBottle * qty;
+  const holdUntilCutoff = unilevelCutoffHoldOn();
+  await insertLedger({
+    user_id: sponsorId,
+    amount: total,
+    type: 'cash',
+    status: holdUntilCutoff ? 'hang' : 'active',
+    note:
+      `Product Comm (Direct Starter Repeat Order | Qty: ${qty})` +
+      (holdUntilCutoff ? ' - Pending Cutoff' : ''),
+    created_at: when,
+  });
+  if (!holdUntilCutoff) await addToWallet(sponsorId, total);
+  return 1;
+}
+
 export async function processUnilevelCommission(
   buyerUserId: number,
   qty = 1,
@@ -115,7 +157,10 @@ export async function processUnilevelCommission(
 
   const buyerRow = await userById(buyer);
   if (!buyerRow) return 0;
-  if (isStarterRank(buyerRow.rank)) return 0; // Starter accounts are excluded
+  // Starter repeat orders: Starter buyers earn no Unilevel themselves, but
+  // their DIRECT Premium/StarPremium sponsor receives the flat Starter
+  // Product Commission (₱20/bottle) once that sponsor meets 5 LP.
+  if (isStarterRank(buyerRow.rank)) return payStarterDirectProductComm(buyerRow, amount, when);
 
   const matrix = unilevelMatrix();
   const uplines = await getStructuralUnilevelUplines(buyer, 100);
@@ -164,7 +209,7 @@ export async function releaseMaturedUnilevelCommissions(): Promise<number> {
   const rows = await q<{ user_id: number; total: string }>(
     `SELECT user_id, COALESCE(SUM(amount),0)::text AS total
      FROM ledger
-     WHERE note LIKE '%Unilevel Comm%' AND type = 'cash' AND status = 'hang'
+     WHERE (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%') AND type = 'cash' AND status = 'hang'
        AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') < $1
      GROUP BY user_id`,
     [currentPeriod],

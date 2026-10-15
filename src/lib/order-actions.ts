@@ -28,8 +28,8 @@ export async function generatePinRow(packageType: string, isProduct: boolean, pu
   for (let attempt = 0; attempt < 8; attempt++) {
     const code = randomCode();
     const rows = await one<{ id: number }>(
-      `INSERT INTO pins (pin_code, package_type, is_product, purchaser_id, status)
-       VALUES ($1,$2,$3,$4,'unused')
+      `INSERT INTO pins (pin_code, package_type, is_product, purchaser_id, status, created_at)
+       VALUES ($1,$2,$3,$4,'unused', now())
        ON CONFLICT (pin_code) DO NOTHING RETURNING id`,
       [code, packageType, isProduct ? 1 : 0, purchaserId],
     );

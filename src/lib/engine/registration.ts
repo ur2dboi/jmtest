@@ -125,8 +125,8 @@ export async function generatePins(opts: {
       tries++;
     } while (tries < 8 && Number((await scalar<number>('SELECT COUNT(*) FROM pins WHERE pin_code = $1', [code])) ?? 0) > 0);
     await exec(
-      `INSERT INTO pins (pin_code, package_type, is_product, purchaser_id, status)
-       VALUES ($1,$2,$3,$4,'unused') ON CONFLICT (pin_code) DO NOTHING`,
+      `INSERT INTO pins (pin_code, package_type, is_product, purchaser_id, status, created_at)
+       VALUES ($1,$2,$3,$4,'unused', now()) ON CONFLICT (pin_code) DO NOTHING`,
       [code, opts.packageType, opts.isProduct ? 1 : 0, Number(opts.purchaserId ?? 0)],
     );
     codes.push(code);
@@ -584,11 +584,18 @@ export async function upgradeRank(
   await addRankHistory(Number(userId), from, to);
   const accounts = await q<{ id: number }>('SELECT id FROM accounts WHERE user_id = $1', [Number(userId)]);
   for (const a of accounts) await setAccountRankSnapshot(Number(a.id), to);
+  if (isStarterRank(from)) {
+    // Starter upgrade: the account now contributes pairing points to the
+    // upline for the first time (Premium = 1 pt, StarPremium = 3 pts).
+    // No direct referral commission is awarded for this upgrade.
+    for (const a of accounts) await processPointUpflow(Number(a.id), Number(userId));
+  }
   if (pin) {
     await consumePin(Number(pin.id), Number(userId), actor?.role === 'admin' ? 'admin' : 'member', actor?.id ?? 0);
-    // Upgrading with a package code pays the sponsor the upgrade difference DR.
+    // Upgrading with a package code pays the sponsor the upgrade difference
+    // DR — except Starter upgrades, which never pay DR.
     let dr = 0;
-    if (Number(user.sponsor_id) > 0) {
+    if (!isStarterRank(from) && Number(user.sponsor_id) > 0) {
       dr = await payDirectReferral(Number(user.sponsor_id), user.username, to, ` (Upgrade PIN #${pin.id})`, Number(userId));
       if (dr > 0) await exec('UPDATE users SET lifetime_dr_paid = lifetime_dr_paid + $1 WHERE id = $2', [dr, Number(user.sponsor_id)]);
     }
@@ -728,7 +735,9 @@ export async function activateProductPin(
   if (!check.ok || !check.pin) return { ok: false, error: check.error };
   const user = await userById(Number(userId));
   if (!user) return { ok: false, error: 'Member not found.' };
-  if (isStarterRank(user.rank)) return { ok: false, error: 'Starter accounts cannot activate retail products.' };
+  // Starter accounts CAN activate retail products (repeat orders): the
+  // buyer's direct Premium/StarPremium sponsor may earn the ₱20/bottle
+  // Starter Product Commission via handleProductActivationUnilevel.
 
   const { markProductPinUsed, handleProductActivationUnilevel, usedProductPinCount } = await import('./unilevel');
   await markProductPinUsed(Number(check.pin.id), Number(userId), source, actorId);

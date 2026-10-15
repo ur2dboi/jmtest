@@ -76,8 +76,10 @@ export async function insertLedger(row: LedgerInsert): Promise<number> {
 export async function calcDrBonus(sponsorId: number, packageType: string, eventTime?: Date): Promise<number> {
   const pkg = String(packageType ?? '').replace(/\s+/g, '').toLowerCase();
   const sponsorRank = (await getUserRankAt(sponsorId, eventTime)).replace(/\s+/g, '').toLowerCase();
-  if (sponsorRank.includes('starter')) return 0;
-  if (pkg.includes('starter')) return settingNum('mlm_sys_dr_starter', 50);
+  // Starter rule: ANY pairing that involves a Starter — Starter sponsor with
+  // any package, or Premium/StarPremium sponsor with a Starter package —
+  // pays the flat Starter DR (₱50 by default).
+  if (sponsorRank.includes('starter') || pkg.includes('starter')) return settingNum('mlm_sys_dr_starter', 50);
   const sponsorCap = sponsorRank.includes('starpremium')
     ? settingNum('mlm_sys_dr_starpremium', 1000)
     : settingNum('mlm_sys_dr_premium', 300);

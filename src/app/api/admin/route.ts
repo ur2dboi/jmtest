@@ -320,7 +320,7 @@ export async function POST(req: Request) {
         return ok({ message: `${isProduct ? 'Product' : 'Package'} #${id} updated successfully.` });
       }
       const rows = await q<{ id: number }>(
-        `INSERT INTO packages (pkg_name, pkg_price, pkg_desc, pkg_variants, is_product, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        `INSERT INTO packages (pkg_name, pkg_price, pkg_desc, pkg_variants, is_product, status, created_at) VALUES ($1,$2,$3,$4,$5,$6, now()) RETURNING id`,
         [payload.name, payload.price, payload.desc, payload.variants, isProduct, payload.status],
       );
       return ok({ message: `${isProduct ? 'Product' : 'Package'} Added Successfully!`, id: Number(rows[0].id) });

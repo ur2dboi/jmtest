@@ -10,6 +10,7 @@ import { q } from './db';
  */
 export const SETTING_DEFAULTS = {
   mlm_sys_dr_starter: 50,
+  mlm_sys_product_comm_starter: 20,
   mlm_sys_dr_premium: 300,
   mlm_sys_dr_starpremium: 1000,
   mlm_sys_bp_amount: 200,
