@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { exec, one, q, scalar } from './db';
 import { phFormat, phMonthKey } from './time';
-import { ensureSettings, setting, settingInt } from '../lib/settings';
+import { ensureSettings, setting, settingInt, settingNum } from '../lib/settings';
 import type { AccountRow, LedgerRow, OrderRow, PackageRow, PinRow, UserRow } from './types';
 import {
   accountById,
@@ -35,6 +35,8 @@ export interface EarningsBreakdown {
   tri: number;
   unilevel: number;
   unilevelPendingCutoff: number;
+  productComm: number;
+  productCommPending: number;
   gc: number;
   totalEarned: number;
   pendingEncash: number;
@@ -48,7 +50,7 @@ export async function earningsFor(userId: number): Promise<EarningsBreakdown> {
   // Single aggregate pass over the member's ledger (was 9 sequential sums).
   const agg = await one<{
     dr: string; pairing_released: string; pairing_hang: string; tri: string;
-    unilevel: string; unilevel_pending: string; gc: string;
+    unilevel: string; unilevel_pending: string; product_comm: string; product_comm_pending: string; gc: string;
     pending_encash: string; total_encashed: string;
   }>(
     `SELECT
@@ -56,8 +58,10 @@ export async function earningsFor(userId: number): Promise<EarningsBreakdown> {
        COALESCE(SUM(CASE WHEN note LIKE '%A+B%' AND type='cash' AND status='released' THEN amount ELSE 0 END),0)::text AS pairing_released,
        COALESCE(SUM(CASE WHEN note LIKE '%A+B%' AND type='cash' AND status='hang' THEN amount ELSE 0 END),0)::text AS pairing_hang,
        COALESCE(SUM(CASE WHEN note LIKE '%Tri-Leg%' AND type='cash' THEN amount ELSE 0 END),0)::text AS tri,
-       COALESCE(SUM(CASE WHEN (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status<>'hang' THEN amount ELSE 0 END),0)::text AS unilevel,
-       COALESCE(SUM(CASE WHEN (note LIKE '%Unilevel%' OR note LIKE '%Product Comm%') AND status='hang' THEN amount ELSE 0 END),0)::text AS unilevel_pending,
+       COALESCE(SUM(CASE WHEN note LIKE '%Unilevel%' AND note NOT LIKE '%Product Comm%' AND status<>'hang' THEN amount ELSE 0 END),0)::text AS unilevel,
+       COALESCE(SUM(CASE WHEN note LIKE '%Unilevel%' AND note NOT LIKE '%Product Comm%' AND status='hang' THEN amount ELSE 0 END),0)::text AS unilevel_pending,
+       COALESCE(SUM(CASE WHEN note LIKE '%Product Comm%' AND status<>'hang' THEN amount ELSE 0 END),0)::text AS product_comm,
+       COALESCE(SUM(CASE WHEN note LIKE '%Product Comm%' AND status='hang' THEN amount ELSE 0 END),0)::text AS product_comm_pending,
        COALESCE(SUM(CASE WHEN type='gc' THEN amount ELSE 0 END),0)::text AS gc,
        COALESCE(SUM(CASE WHEN note LIKE '%Encashment%' AND note LIKE '%Pending%' AND note NOT LIKE '%REJECTED%' AND note NOT LIKE '%APPROVED%' THEN ABS(amount) ELSE 0 END),0)::text AS pending_encash,
        COALESCE(SUM(CASE WHEN note LIKE '%Encashment%' AND (note LIKE '%APPROVED%' OR note LIKE '%APPROVED & PAID%') AND note NOT LIKE '%REJECTED%' THEN ABS(amount) ELSE 0 END),0)::text AS total_encashed
@@ -70,10 +74,12 @@ export async function earningsFor(userId: number): Promise<EarningsBreakdown> {
   const tri = num(agg?.tri);
   const unilevel = num(agg?.unilevel);
   const unilevelPendingCutoff = num(agg?.unilevel_pending);
+  const productComm = num(agg?.product_comm);
+  const productCommPending = num(agg?.product_comm_pending);
   const gc = Math.trunc(num(agg?.gc));
   const pendingEncash = num(agg?.pending_encash);
   const totalEncashed = num(agg?.total_encashed);
-  const totalEarned = dr + pairingReleased + tri + unilevel;
+  const totalEarned = dr + pairingReleased + tri + unilevel + productComm;
   const user = await userById(uid);
   return {
     dr,
@@ -82,6 +88,8 @@ export async function earningsFor(userId: number): Promise<EarningsBreakdown> {
     tri,
     unilevel,
     unilevelPendingCutoff,
+    productComm,
+    productCommPending,
     gc,
     totalEarned,
     pendingEncash,
@@ -118,6 +126,7 @@ export interface MemberPortalData {
   adminActivatedProducts: PinRow[];
   gateComplete: boolean;
   maintenance: boolean;
+  starterBenefits: { dr: number; productCommPerBottle: number };
 }
 
 /** Resolve the logged-in member's MA + CA nodes and the active node. */
@@ -294,6 +303,10 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
     adminActivatedProducts,
     gateComplete: ma ? await firstRowsComplete(Number(ma.id)) : false,
     maintenance: setting('mlm_maintenance_mode') === '1',
+    starterBenefits: {
+      dr: settingNum('mlm_sys_dr_starter', 50),
+      productCommPerBottle: settingNum('mlm_sys_product_comm_starter', 20),
+    },
   };
 }
 

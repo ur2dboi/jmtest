@@ -219,6 +219,12 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
           <SummaryRow label="A+B Pairing Bonus" value={peso(earn.pairingReleased)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Tri-Leg Bonus" value={peso(earn.tri)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab('mtab-reports')} />
+          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab('mtab-reports')} />
+          {earn.productCommPending > 0 && (
+            <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
+              <span>⏳ Product Comm Pending Cutoff</span><strong>{peso(earn.productCommPending)}</strong>
+            </div>
+          )}
           {earn.unilevelPendingCutoff > 0 && (
             <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
               <span>⏳ Unilevel Pending Cutoff</span><strong>{peso(earn.unilevelPendingCutoff)}</strong>
@@ -264,6 +270,8 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
         </div>
       </div>
 
+      <StarterBenefitsCard data={data} setTab={setTab} />
+
       {!data.isChildLogin && (
         <div className="card text-center">
           <h3 className="text-[15px] font-bold text-zinc-100">🔑 Available Codes (Summary)</h3>
@@ -275,6 +283,96 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
       )}
 
       <CaModal open={caOpen} onClose={() => setCaOpen(false)} pins={data.packagePins} post={post} busy={busy} />
+    </div>
+  );
+}
+
+/* ============ STARTER BENEFITS & PRODUCT COMMISSION ============ */
+function StarterBenefitsCard({ data, setTab }: { data: MemberPortalData; setTab: (t: string) => void }) {
+  const b = data.starterBenefits ?? { dr: 50, productCommPerBottle: 20 };
+  const earn = data.earnings;
+  const rankNorm = (data.user.rank || '').replace(/\s+/g, '').toLowerCase();
+  const isStarter = rankNorm.includes('starter');
+  const isPremiumTier = !isStarter && rankNorm.includes('premium');
+  const lpNeeded = Math.max(0, 5 - data.lp);
+  const drRows: [string, string][] = [
+    ['Starter', 'Starter'],
+    ['Starter', 'Premium'],
+    ['Starter', 'StarPremium'],
+    ['Premium', 'Starter'],
+    ['StarPremium', 'Starter'],
+  ];
+  return (
+    <div className="card">
+      <h3 className="panel-title !text-gold">🌱 Starter Benefits &amp; Product Commission</h3>
+      <div className="mt-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <p className="text-[12px] font-bold uppercase tracking-wide text-zinc-400">
+            Receivable Direct Referral — {peso(b.dr)}
+          </p>
+          <div className="mt-1">
+            {drRows.map(([s, r]) => (
+              <div key={`${s}-${r}`} className="flex items-center justify-between border-b border-dashed border-line/60 py-1 text-[13px]">
+                <span className="text-zinc-400">{s} <span className="text-zinc-600">→</span> {r}</span>
+                <strong className="text-zinc-100">{peso(b.dr)}</strong>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+            Starter accounts are <strong className="text-zinc-300">upgradeable to Premium or StarPremium</strong>.
+            Upon upgrade, the account starts contributing pairing points to the upline — no direct referral
+            commission is awarded for the upgrade itself.
+          </p>
+        </div>
+        <div>
+          <p className="text-[12px] font-bold uppercase tracking-wide text-zinc-400">
+            Product Commission — {peso(b.productCommPerBottle)} per bottle
+          </p>
+          <p className="mt-1 text-[13px] text-zinc-300">
+            On <strong>all direct Starter repeat orders</strong> (per piece), paid to the direct
+            Premium / StarPremium sponsor.
+          </p>
+          {isPremiumTier ? (
+            <div className="mt-2 space-y-1 text-[13px]">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Your LP (maintenance)</span>
+                <strong className={data.lpEligible ? 'text-emerald-400' : 'text-amber-300'}>
+                  {data.lp} LP {data.lpEligible ? '· Eligible ✓' : `· Need ${lpNeeded} more LP`}
+                </strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Product Comm earned</span>
+                <strong className="text-zinc-100">{peso(earn.productComm)}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Pending cutoff (monthly)</span>
+                <strong className="text-amber-300">{peso(earn.productCommPending)}</strong>
+              </div>
+              {!data.lpEligible && (
+                <p className="text-[11px] text-amber-300/90">
+                  ⚠️ Product Commission is credited only once you meet the 5 LP maintenance requirement.
+                </p>
+              )}
+              <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab('mtab-reports')}>
+                View in Income Reports →
+              </button>
+            </div>
+          ) : isStarter ? (
+            <p className="mt-2 text-[12px] leading-relaxed text-zinc-500">
+              As a <strong className="text-zinc-300">Starter</strong>, your repeat product orders earn your direct
+              Premium/StarPremium sponsor {peso(b.productCommPerBottle)} per bottle (once they meet the 5 LP
+              maintenance). Upgrade to <strong className="text-zinc-300">Premium</strong> or{' '}
+              <strong className="text-zinc-300">StarPremium</strong> to receive this commission on your own
+              direct Starters' repeat orders.
+            </p>
+          ) : (
+            <p className="mt-2 text-[12px] text-zinc-500">Credited to Premium/StarPremium accounts that meet the 5 LP maintenance requirement.</p>
+          )}
+          <p className="mt-2 border-t border-dashed border-line pt-2 text-[11px] text-zinc-500">
+            Product Commission is credited <strong className="text-zinc-300">monthly, together with the Unilevel Commission</strong>.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
