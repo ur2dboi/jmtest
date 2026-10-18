@@ -192,7 +192,8 @@ export async function POST(req: Request) {
 
     /* ---------------- upgrade account ---------------- */
     if (action === 'upgrade') {
-      if (loggedInAsChild) return fail('Child Accounts cannot upgrade. Please log in to the Mother Account.');
+      // Child Accounts may upgrade their own node (e.g. Starter CA -> Premium);
+      // the code must come from the Child Account's own vault (purchaser check below).
       const pin = await one<PinRow>(
         `SELECT * FROM pins WHERE id=$1 AND purchaser_id=$2 AND status='unused' AND is_product=0`,
         [Number(b.pin_id), user.id],

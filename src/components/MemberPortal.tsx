@@ -48,7 +48,7 @@ const TABS: { id: string; label: string; icon: string; hideForChild?: boolean }[
   { id: 'mtab-prod-orders', label: 'Product Orders', icon: '🛍️' },
   { id: 'mtab-product-vault', label: 'My Products', icon: '🎁', hideForChild: true },
   { id: 'mtab-associates', label: 'My Associates', icon: '🤝', hideForChild: true },
-  { id: 'mtab-profile', label: 'Profile', icon: '⚙️', hideForChild: true },
+  { id: 'mtab-profile', label: 'Profile', icon: '⚙️' },
 ];
 
 function dt(v: unknown, fmt = 'M d, Y - g:i A'): string {
@@ -167,7 +167,7 @@ export default function MemberPortal(props: MemberPortalProps) {
 
         {isChild && (
           <div className="mb-4 rounded-lg border border-red-800 bg-red-950/50 px-4 py-3 text-center text-[13px] font-semibold text-red-300">
-            🔒 CHILD ACCOUNT ACTIVE: This node is exclusively for network pairing and encashment. Direct referrals, purchasing, and profile management must be executed via your Mother Account.
+            🔒 CHILD ACCOUNT ACTIVE: This node is exclusively for network pairing and encashment. Direct referrals, purchasing, and profile management must be executed via your Mother Account — but you may upgrade this Child Account's package under Profile ⬆️.
           </div>
         )}
 
@@ -182,7 +182,7 @@ export default function MemberPortal(props: MemberPortalProps) {
         {tab === 'mtab-prod-orders' && <ProdOrdersTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-product-vault' && !isChild && <ProductVaultTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-associates' && !isChild && <AssociatesTab associates={props.associates} />}
-        {tab === 'mtab-profile' && !isChild && <ProfileTab {...props} post={post} busy={busy} />}
+        {tab === 'mtab-profile' && <ProfileTab {...props} post={post} busy={busy} />}
       </main>
     </div>
   );
@@ -1212,6 +1212,54 @@ function ProfileTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) 
     reader.readAsDataURL(file);
   }
 
+  const upgradeCard = data.canUpgrade ? (
+      <div className="card" style={{ borderColor: '#d97706' }}>
+        <h3 className="text-[15px] font-bold text-amber-500">⬆️ Upgrade Account</h3>
+        <p className="text-[12px] text-zinc-500">Use an eligible package code from your vault to upgrade. Starter can upgrade to Premium or StarPremium; Premium can upgrade to StarPremium.</p>
+        <form
+          className="mt-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!confirmDialog('Upgrade your account? This will consume the selected code.')) return;
+            await post({ action: 'upgrade', pin_id: upgradePinId });
+          }}
+        >
+          <span className="lbl">Select Upgrade Code from Vault</span>
+          <select className="select" required value={upgradePinId} onChange={(e) => setUpgradePinId(Number(e.target.value))}>
+            <option value={0}>-- Choose Upgrade Code --</option>
+            {data.upgradePins.map((p) => <option key={p.id} value={p.id}>{p.package_type} (Code #{p.id})</option>)}
+            {data.upgradePins.length === 0 && <option value={0} disabled>No eligible upgrade codes available — purchase one first</option>}
+          </select>
+          <button type="submit" disabled={busy || !upgradePinId} className="btn mt-3 w-full !bg-amber-600 font-bold text-black hover:!bg-amber-500 disabled:opacity-40">
+            ⬆️ Confirm Upgrade
+          </button>
+        </form>
+      </div>
+  ) : null;
+
+  if (data.isChildLogin) {
+    return (
+      <div className="animate-fadeIn space-y-4">
+        <div className="card">
+          <h3 className="text-[16px] font-bold text-gold">Child Account Details</h3>
+          <div className="mt-3 space-y-2 text-[13px]">
+            <div className="flex justify-between"><span className="text-zinc-500">Username</span><strong>@{user.username}</strong></div>
+            <div className="flex justify-between"><span className="text-zinc-500">ID#</span><strong>{data.idStatus.id_number || 'Pending Admin Setup'}</strong></div>
+            <div className="flex justify-between"><span className="text-zinc-500">Name</span><strong>{user.first_name} {user.last_name}</strong></div>
+            <div className="flex justify-between"><span className="text-zinc-500">Current Rank</span><strong className="text-gold">{user.rank}</strong></div>
+          </div>
+          <p className="mt-3 text-[12px] text-zinc-500">Profile details and other settings for this node are managed through your Mother Account. You can upgrade this Child Account's package below using a Premium/StarPremium code from this Child Account's own vault.</p>
+        </div>
+        {upgradeCard ?? (
+          <div className="card">
+            <h3 className="text-[15px] font-bold text-amber-500">⬆️ Upgrade Account</h3>
+            <p className="mt-1 text-[12px] text-zinc-500">No upgrade is currently available for this Child Account.</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fadeIn space-y-4">
       <div className="card">
@@ -1259,30 +1307,7 @@ function ProfileTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) 
         </form>
       </div>
 
-      {data.canUpgrade && (
-        <div className="card" style={{ borderColor: '#d97706' }}>
-          <h3 className="text-[15px] font-bold text-amber-500">⬆️ Upgrade Account</h3>
-          <p className="text-[12px] text-zinc-500">Use an eligible package code from your vault to upgrade. Starter can upgrade to Premium or StarPremium; Premium can upgrade to StarPremium.</p>
-          <form
-            className="mt-3"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!confirmDialog('Upgrade your account? This will consume the selected code.')) return;
-              await post({ action: 'upgrade', pin_id: upgradePinId });
-            }}
-          >
-            <span className="lbl">Select Upgrade Code from Vault</span>
-            <select className="select" required value={upgradePinId} onChange={(e) => setUpgradePinId(Number(e.target.value))}>
-              <option value={0}>-- Choose Upgrade Code --</option>
-              {data.upgradePins.map((p) => <option key={p.id} value={p.id}>{p.package_type} (Code #{p.id})</option>)}
-              {data.upgradePins.length === 0 && <option value={0} disabled>No eligible upgrade codes available — purchase one first</option>}
-            </select>
-            <button type="submit" disabled={busy || !upgradePinId} className="btn mt-3 w-full !bg-amber-600 font-bold text-black hover:!bg-amber-500 disabled:opacity-40">
-              ⬆️ Confirm Upgrade
-            </button>
-          </form>
-        </div>
-      )}
+      {upgradeCard}
 
       <div className="card">
         <h3 className="border-b border-line pb-2 text-[15px] font-bold text-emerald-400">📊 Earnings Summary</h3>

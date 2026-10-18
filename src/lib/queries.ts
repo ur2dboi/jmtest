@@ -213,7 +213,9 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
   );
 
   const rankNorm = (user.rank || '').replace(/\s+/g, '').toLowerCase();
-  const canUpgrade = !isChildLogin && (rankNorm.includes('starter') || (rankNorm.includes('premium') && !rankNorm.includes('starpremium')));
+  // Child Accounts may upgrade their own node too (e.g. a Starter CA using a
+  // Premium/StarPremium code from its own vault); other CA actions stay MA-only.
+  const canUpgrade = rankNorm.includes('starter') || (rankNorm.includes('premium') && !rankNorm.includes('starpremium'));
   const upgradePins = canUpgrade
     ? rankNorm.includes('starter')
       ? await q<PinRow>(
