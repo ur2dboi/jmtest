@@ -144,7 +144,8 @@ scripts/db-seed.mts           Seed packages/admin/demo network
 - **Ranks**: Starter (DR only, no points) · Premium (1 A/B point) · StarPremium (3 A/B points).
 - **DR**: direct sponsor only; sponsor-rank capped; Starter sponsors earn 0.
 - **A+B**: min(L,C) matched points × ₱200; every 5th = 1 GC instead of cash; unmatched points wait.
-- **Tri-Leg**: completed A+B triggers × right-leg members; 1 ₱300 unit, or 2 units when receiver
+- **Tri-Leg**: completed A+B triggers × right-leg points (Premium member = 1 pt, StarPremium member
+  = 2 pts on the C/right leg); 1 ₱300 unit, or 2 units when receiver
   **and** right-source are StarPremium; every 5th unit = 1 GC.
 - **Daily caps** (GC included, reset 12:01 AM Asia/Manila): MA 15/30, CA 10/20; matched excess is
   flushed, unmatched excess stays waiting.

@@ -348,7 +348,7 @@ export async function POST(req: Request) {
         'mlm_sys_tri_premium', 'mlm_sys_limit_premium', 'mlm_sys_limit_starpremium',
         'mlm_sys_limit_ca_premium', 'mlm_sys_limit_ca_starpremium', 'mlm_sys_gc_every',
         'mlm_sys_max_depth', 'mlm_sys_tax', 'mlm_sys_fee', 'mlm_sys_fund_transfer_fee', 'mlm_sys_min_encash',
-        'mlm_sys_product_comm_starter',
+        'mlm_sys_product_comm_starter', 'mlm_sys_rpts_premium', 'mlm_sys_rpts_starpremium',
       ];
       const out: Record<string, string> = {};
       for (const k of numKeys) if (v[k] !== undefined) out[k] = String(Number(v[k]) || 0);
@@ -356,9 +356,6 @@ export async function POST(req: Request) {
         const k = `mlm_sys_uni_l${i}`;
         if (v[k] !== undefined) out[k] = String(Number(v[k]) || 0);
       }
-      // Final rule: right-leg trigger count fixed at 1 for both ranks.
-      out.mlm_sys_rpts_premium = '1';
-      out.mlm_sys_rpts_starpremium = '1';
       for (const k of ['mlm_sys_unilevel_monthly_reset', 'mlm_sys_unilevel_cutoff_hold', 'mlm_sys_auto_approve_products']) {
         if (v[k] !== undefined) out[k] = v[k] ? '1' : '0';
       }

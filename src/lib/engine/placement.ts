@@ -1,10 +1,12 @@
 import { one, q, scalar } from '../db';
+import { settingInt } from '../settings';
 import type { AccountRow, Placement, PlacementCheck, Position } from '../types';
 import {
   accountById,
   isAccountDescendant,
   isCA,
   isMA,
+  isStarRank,
   isStarterRank,
   maAccountForUser,
   maxChildDepth,
@@ -495,11 +497,36 @@ export async function legMetricDownlineCount(accountId: number, leg: Position): 
   return count;
 }
 
+/** Right-leg qualifying members weighted by trigger points (Premium 1, StarPremium 2). */
+export async function legRightTriggerPoints(accountId: number): Promise<number> {
+  const directId = await scalar<number>('SELECT id FROM accounts WHERE upline_id = $1 AND position = $2 LIMIT 1', [
+    Number(accountId),
+    'R',
+  ]);
+  if (!directId) return 0;
+  const levels = await subtreeByDepth(Number(directId), 50);
+  const ids: number[] = [];
+  for (const [depth, atDepth] of Object.entries(levels)) {
+    if (Number(depth) === 0) continue; // the leg root itself never counts
+    ids.push(...atDepth);
+  }
+  if (!ids.length) return 0;
+  const rows = await q<{ user_id: number }>('SELECT user_id FROM accounts WHERE id = ANY($1::bigint[])', [ids]);
+  let total = 0;
+  for (const r of rows) {
+    const u = await userById(Number(r.user_id));
+    if (!u) continue;
+    if (isStarterRank(u.rank || 'Premium')) continue;
+    total += isStarRank(u.rank) ? settingInt('mlm_sys_rpts_starpremium', 2) : settingInt('mlm_sys_rpts_premium', 1);
+  }
+  return total;
+}
+
 export async function triLegStructuralCap(accountId: number): Promise<number> {
   return Math.min(
     await legQualifyingDownlineCount(accountId, 'L'),
     await legQualifyingDownlineCount(accountId, 'C'),
-    await legQualifyingDownlineCount(accountId, 'R'),
+    await legRightTriggerPoints(accountId),
   );
 }
 

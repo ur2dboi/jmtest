@@ -154,9 +154,9 @@ export async function processPointUpflow(
   if (isStarterRank(rank)) return; // Starter: no points at all
 
   const pointsToAdd = isStarRank(rank) ? 3 : 1;
-  // Final rule: 1 right-leg trigger per member regardless of package.
+  // Right-leg trigger points per member: Premium = 1, StarPremium = 2 (settings-driven).
   const rPointsToAdd = isStarRank(rank)
-    ? settingInt('mlm_sys_rpts_starpremium', 1)
+    ? settingInt('mlm_sys_rpts_starpremium', 2)
     : settingInt('mlm_sys_rpts_premium', 1);
 
   let currentNodeId = nodeId;

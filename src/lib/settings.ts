@@ -23,7 +23,7 @@ export const SETTING_DEFAULTS = {
   mlm_sys_gc_every: 5,
   mlm_sys_max_depth: 8,
   mlm_sys_rpts_premium: 1,
-  mlm_sys_rpts_starpremium: 1,
+  mlm_sys_rpts_starpremium: 2,
   mlm_sys_tax: 10,
   mlm_sys_fee: 20,
   mlm_sys_fund_transfer_fee: 25,
