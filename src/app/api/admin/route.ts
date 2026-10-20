@@ -234,7 +234,13 @@ export async function POST(req: Request) {
       const id = Number(b.order_id);
       if (b.mode === 'approve') {
         const r = await approveOrder(id, actorRef);
-        return r.ok ? ok({ message: `Order #${id} approved. ${r.generated ?? 0} code(s) generated as unused.` }) : fail(r.error!);
+        return r.ok
+          ? ok({
+              message: (r.activated ?? 0) > 0
+                ? `Order #${id} approved. ${r.activated} code(s) auto-activated (Product Commission Activation — Starter LP purchase).`
+                : `Order #${id} approved. ${r.generated ?? 0} code(s) generated as unused.`,
+            })
+          : fail(r.error!);
       }
       if (b.mode === 'activate') {
         const r = await approveOrder(id, actorRef, { activate: true });

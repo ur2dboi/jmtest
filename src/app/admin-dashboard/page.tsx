@@ -1,5 +1,6 @@
 import { q, scalar } from '@/lib/db';
 import { ensureSettings, settingBool } from '@/lib/settings';
+import { releaseMaturedUnilevelCommissions } from '@/lib/engine/unilevel';
 import { getSession, getUserById } from '@/lib/auth';
 import { phFormat } from '@/lib/time';
 import {
@@ -55,6 +56,7 @@ export default async function AdminDashboardPage({
   }
 
   await ensureSettings();
+  await releaseMaturedUnilevelCommissions(); // monthly Floating (LP) settlement
   const sp = await searchParams;
   const monthStart = phFormat(new Date(), 'Y-m-01');
   const monthEnd = phFormat(new Date(), 'Y-m-t');

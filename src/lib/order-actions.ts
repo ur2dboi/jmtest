@@ -1,6 +1,6 @@
 import { exec, one } from './db';
 import type { OrderRow, PackageRow } from './types';
-import { auditLog, userById } from './engine/accounts';
+import { auditLog, isStarterRank, userById } from './engine/accounts';
 import { consumePin } from './engine/registration';
 import { handleProductActivationUnilevel, markProductPinUsed } from './engine/unilevel';
 import { packagesByName } from './queries';
@@ -76,15 +76,21 @@ export async function approveOrder(
   const pkg: PackageRow | undefined = byName.get(pkgName);
   const isProduct = !!pkg && Number(pkg.is_product) === 1;
 
+  // Starter LP purchases go DIRECTLY to Product Commission Activation:
+  // on approval the codes are activated immediately (the sponsor's Product
+  // Commission posts as Floating, the buyer receives the LP credit).
+  const buyer = isProduct ? await userById(Number(order.user_id)) : null;
+  const autoActivate = isProduct && (opts.activate === true || isStarterRank(buyer?.rank ?? ''));
+
   await exec(`UPDATE orders SET status='approved' WHERE id = $1`, [order.id]);
   let generated = 0;
   let activated = 0;
   for (let i = 0; i < qty; i++) {
     const pinId = await generatePinRow(pkgName, isProduct, Number(order.user_id));
     generated++;
-    // Product pins stay 'unused' on plain approval: the member activates
-    // from My Products and only then are commissions distributed.
-    if (opts.activate && isProduct) {
+    // Other product pins stay 'unused' on plain approval: the member
+    // activates from My Products and only then are commissions distributed.
+    if (autoActivate) {
       await markProductPinUsed(pinId, Number(order.user_id), 'admin');
       await handleProductActivationUnilevel(Number(order.user_id), 1);
       activated++;
@@ -92,7 +98,7 @@ export async function approveOrder(
   }
   await auditLog({
     actorUserId: actor.id, actorUsername: actor.username, actorRole: 'admin',
-    category: 'orders', action: opts.activate ? 'APPROVE + ACTIVATE ORDER' : 'APPROVE ORDER',
+    category: 'orders', action: autoActivate ? 'APPROVE + ACTIVATE ORDER' : 'APPROVE ORDER',
     targetUserId: Number(order.user_id), details: { orderId: order.id, qty, pkgName, isProduct, generated, activated },
   });
   return { ok: true, generated, activated };

@@ -1170,14 +1170,13 @@ function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Unilevel Released (All-Time)" value={peso(r.released)} />
-        <Stat label="Pending Cutoff (Held)" value={<span className="text-amber-300">{peso(r.pending)}</span>} sub="Released at monthly cutoff" />
+        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(r.pending)}</span>} />
         <Stat label="Members Earning Unilevel" value={String(r.earners)} />
         <Stat label="Crediting Mode" value={r.cutoffHold ? 'Monthly Cutoff' : 'Instant'} sub={r.monthlyReset ? 'LP resets monthly (5 LP to qualify)' : 'Lifetime LP (5 LP to qualify)'} />
       </div>
 
       <div className="card">
         <h3 className="text-[16px] font-bold text-gold">📶 Unilevel Commission Matrix (₱ per bottle)</h3>
-        <p className="mt-1 text-[12px] text-zinc-500">Dynamic compression: Starter / under-maintained / CA-connector uplines are skipped without consuming a paid tier. Edit the rates in Comp. Plan settings (Unilevel Levels 1–10).</p>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
           {r.rates.map((rate, i) => (
             <div key={i} className="rounded-lg border border-line bg-[#0a0a0a] px-3 py-2 text-center">
@@ -1190,7 +1189,6 @@ function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post
 
       <div className="card" style={{ borderColor: '#065f46' }}>
         <h3 className="text-[15px] font-bold text-emerald-400">🧾 Unilevel Code Requests</h3>
-        <p className="mt-1 text-[12px] text-zinc-500">Members request Unilevel Codes (separate UNI-… series) from their Unilevel tab — no Product Orders checkout. Approving issues the codes straight into the member&apos;s My Products vault. Product Commission code requests (PCC-…) are handled in the Product Commission tab.</p>
         {report.codeRequests.filter((r) => r.status === 'pending').length === 0 && (
           <p className="mt-3 text-[13px] text-zinc-500">No pending requests.</p>
         )}
@@ -1236,7 +1234,7 @@ function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post
         <h3 className="text-[15px] font-bold text-emerald-400">Per-Member Unilevel Earnings</h3>
         <div className="tbl-wrap mt-2">
           <table className="tbl">
-            <thead><tr><th>Member</th><th>Rank</th><th>LP</th><th>Eligible (≥5 LP)</th><th>Released</th><th>Pending Cutoff</th><th>Total</th></tr></thead>
+            <thead><tr><th>Member</th><th>Rank</th><th>LP</th><th>Eligible (≥5 LP)</th><th>Released</th><th>Floating (LP)</th><th>Total</th></tr></thead>
             <tbody>
               {r.rows.length === 0 && <tr><td colSpan={7} className="text-center text-zinc-500">No Unilevel earnings recorded yet.</td></tr>}
               {r.rows.map((m) => (
@@ -1267,7 +1265,7 @@ function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
                   <td>@{l.username}</td>
                   <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
                 </tr>
               ))}
@@ -1286,25 +1284,13 @@ function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Product Comm Released (All-Time)" value={peso(r.released)} />
-        <Stat label="Pending Cutoff (Held)" value={<span className="text-amber-300">{peso(r.pending)}</span>} sub="Released monthly with Unilevel" />
+        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(r.pending)}</span>} />
         <Stat label="Starter Bottles Credited" value={String(r.bottles)} sub={`At ${peso(r.perBottle)} per bottle`} />
         <Stat label="Members Earning" value={String(r.earners)} />
       </div>
 
       <div className="card" style={{ borderColor: '#0e7490' }}>
-        <h3 className="text-[16px] font-bold text-cyan-300">🧴 Product Commission Rule</h3>
-        <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
-          Paid only to the <strong className="text-zinc-300">direct sponsor</strong> of a Starter member, on that Starter&apos;s repeat product
-          activations (Product Codes from Product Orders — separate from package codes). The sponsor must be
-          <strong className="text-zinc-300"> Premium or StarPremium</strong> with at least <strong className="text-zinc-300">5 LP maintenance</strong>.
-          Earnings are held as Pending Cutoff and released monthly together with Unilevel. Rate is editable in
-          Comp. Plan settings (Starter Repeat-Order Product Comm).
-        </p>
-      </div>
-
-      <div className="card" style={{ borderColor: '#0e7490' }}>
         <h3 className="text-[15px] font-bold text-cyan-300">🧾 Product Code Requests</h3>
-        <p className="mt-1 text-[12px] text-zinc-500">Members request Product Codes from their Product Commission tab (no Product Orders checkout). Approving issues the codes straight into the member&apos;s My Products vault.</p>
         {report.codeRequests.filter((r) => r.status === 'pending').length === 0 && (
           <p className="mt-3 text-[13px] text-zinc-500">No pending requests.</p>
         )}
@@ -1350,7 +1336,7 @@ function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport
         <h3 className="text-[15px] font-bold text-cyan-300">Per-Member Product Commission</h3>
         <div className="tbl-wrap mt-2">
           <table className="tbl">
-            <thead><tr><th>Member (Sponsor)</th><th>Rank</th><th>Bottles Credited</th><th>Released</th><th>Pending Cutoff</th><th>Total</th></tr></thead>
+            <thead><tr><th>Member (Sponsor)</th><th>Rank</th><th>Bottles Credited</th><th>Released</th><th>Floating (LP)</th><th>Total</th></tr></thead>
             <tbody>
               {r.rows.length === 0 && <tr><td colSpan={6} className="text-center text-zinc-500">No Product Commission recorded yet.</td></tr>}
               {r.rows.map((m) => (
@@ -1380,7 +1366,7 @@ function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
                   <td>@{l.username}</td>
                   <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
                 </tr>
               ))}

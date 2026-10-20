@@ -8,6 +8,7 @@ import {
   auditLog,
   invalidateUser,
   isCA,
+  isStarterRank,
   maAccountForUser,
   memberIdStatus,
   primaryAccountForUser,
@@ -249,9 +250,21 @@ export async function POST(req: Request) {
       );
       const orderId = Number(rows[0].id);
       if (autoApprove) {
-        for (let i = 0; i < qty; i++) await generatePinRow(pkg.pkg_name, true, Number(user.id));
-        await audit(actor, 'purchase', 'PRODUCT ORDER (AUTO-APPROVED)', { orderId, qty, pkg: pkg.pkg_name });
-        return ok({ message: `Order approved! ${qty} product code(s) generated and added to your vault. Activate them in My Products to distribute commissions.` });
+        // Starter LP purchases activate immediately (Product Commission Activation).
+        let activated = 0;
+        for (let i = 0; i < qty; i++) {
+          const pinId = await generatePinRow(pkg.pkg_name, true, Number(user.id));
+          if (isStarterRank(user.rank)) {
+            const pin = await one<PinRow>('SELECT * FROM pins WHERE id=$1', [pinId]);
+            if (pin && (await activateProductPin(Number(user.id), pin.pin_code, 'member', Number(user.id))).ok) activated++;
+          }
+        }
+        await audit(actor, 'purchase', 'PRODUCT ORDER (AUTO-APPROVED)', { orderId, qty, pkg: pkg.pkg_name, activated });
+        return ok({
+          message: activated > 0
+            ? `Order approved and activated! ${activated} product(s) activated — Product Commission has been credited to your sponsor as Floating (LP).`
+            : `Order approved! ${qty} product code(s) generated and added to your vault. Activate them in My Products to distribute commissions.`,
+        });
       }
       await audit(actor, 'purchase', 'SUBMIT ORDER', { orderId, qty, pkg: pkg.pkg_name, type });
       return ok({ message: 'Order submitted successfully! Admin will review your order shortly.' });

@@ -139,7 +139,7 @@ async function payStarterDirectProductComm(
     status: holdUntilCutoff ? 'hang' : 'active',
     note:
       `Product Comm (Direct Starter Repeat Order | Qty: ${qty})` +
-      (holdUntilCutoff ? ' - Pending Cutoff' : ''),
+      (holdUntilCutoff ? ' - Floating (LP)' : ''),
     created_at: when,
   });
   if (!holdUntilCutoff) await addToWallet(sponsorId, total);
@@ -192,7 +192,7 @@ export async function processUnilevelCommission(
       status: holdUntilCutoff ? 'hang' : 'active',
       note:
         `Unilevel Comm (Compressed Level ${paidTier} | Structural Level ${upline.level} | Qty: ${amount})` +
-        (holdUntilCutoff ? ' - Pending Cutoff' : ''),
+        (holdUntilCutoff ? ' - Floating (LP)' : ''),
       created_at: when,
     });
     if (!holdUntilCutoff) await addToWallet(sponsorId, total);
@@ -228,7 +228,7 @@ export async function releaseMaturedUnilevelCommissions(): Promise<number> {
   if (released.length) {
     await exec(
       `UPDATE ledger SET status = 'released'
-       WHERE user_id = ANY($1::bigint[]) AND note LIKE '%Unilevel Comm%'
+       WHERE user_id = ANY($1::bigint[]) AND (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%')
          AND type = 'cash' AND status = 'hang'
          AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') < $2`,
       [released, currentPeriod],
@@ -245,7 +245,7 @@ export async function rebuildUnilevelCommissionsScope(currentPeriodOnly?: boolea
   if (periodScoped) {
     const period = phMonthKey();
     await exec(
-      `DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%'
+      `DELETE FROM ledger WHERE (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%')
          AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $1`,
       [period],
     );
@@ -264,7 +264,7 @@ export async function rebuildUnilevelCommissionsScope(currentPeriodOnly?: boolea
       count += Number(r.qty);
     }
   } else {
-    await exec(`DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%'`);
+    await exec(`DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%'`);
     const rows = await q<{ activator_id: number; event_date: string; qty: string }>(
       `SELECT COALESCE(used_by, purchaser_id) AS activator_id,
               to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS event_date,

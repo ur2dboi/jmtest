@@ -46,8 +46,7 @@ const TABS: { id: string; label: string; icon: string; hideForChild?: boolean }[
   { id: 'mtab-prodcomm', label: 'Product Commission', icon: '🧴', hideForChild: true },
   { id: 'mtab-tree', label: 'Genealogy', icon: '🌳' },
   { id: 'mtab-encash', label: 'Encashment', icon: '💸' },
-  { id: 'mtab-pkg-orders', label: 'Package Orders', icon: '📦' },
-  { id: 'mtab-prod-orders', label: 'Product Orders', icon: '🛍️' },
+  { id: 'mtab-purchasing', label: 'Purchasing', icon: '🛒' },
   { id: 'mtab-product-vault', label: 'My Products', icon: '🎁', hideForChild: true },
   { id: 'mtab-associates', label: 'My Associates', icon: '🤝', hideForChild: true },
   { id: 'mtab-profile', label: 'Profile', icon: '⚙️' },
@@ -182,8 +181,7 @@ export default function MemberPortal(props: MemberPortalProps) {
         {tab === 'mtab-prodcomm' && !isChild && <ProductCommTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
-        {tab === 'mtab-pkg-orders' && <PkgOrdersTab {...props} post={post} busy={busy} setTab={setTab} />}
-        {tab === 'mtab-prod-orders' && <ProdOrdersTab {...props} post={post} busy={busy} />}
+        {tab === 'mtab-purchasing' && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
         {tab === 'mtab-product-vault' && !isChild && <ProductVaultTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-associates' && !isChild && <AssociatesTab associates={props.associates} />}
         {tab === 'mtab-profile' && <ProfileTab {...props} post={post} busy={busy} />}
@@ -224,16 +222,9 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
           <SummaryRow label="Tri-Leg Bonus" value={peso(earn.tri)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
           <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-prodcomm')} />
-          {earn.productCommPending > 0 && (
-            <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
-              <span>⏳ Product Comm Pending Cutoff</span><strong>{peso(earn.productCommPending)}</strong>
-            </div>
-          )}
-          {earn.unilevelPendingCutoff > 0 && (
-            <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
-              <span>⏳ Unilevel Pending Cutoff</span><strong>{peso(earn.unilevelPendingCutoff)}</strong>
-            </div>
-          )}
+          <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
+            <span>FLOATING Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff + earn.productCommPending)}</strong>
+          </div>
           <div className="flex items-center justify-between py-1 text-[13px]">
             <span className="text-emerald-400">Available GC</span><strong className="text-emerald-400">{earn.gc}</strong>
           </div>
@@ -322,19 +313,10 @@ function StarterBenefitsCard({ data, setTab }: { data: MemberPortalData; setTab:
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
-            Starter accounts are <strong className="text-zinc-300">upgradeable to Premium or StarPremium</strong>.
-            Upon upgrade, the account starts contributing pairing points to the upline — no direct referral
-            commission is awarded for the upgrade itself.
-          </p>
         </div>
         <div>
           <p className="text-[12px] font-bold uppercase tracking-wide text-zinc-400">
             Product Commission — {peso(b.productCommPerBottle)} per bottle
-          </p>
-          <p className="mt-1 text-[13px] text-zinc-300">
-            On <strong>all direct Starter repeat orders</strong> (per piece), paid to the direct
-            Premium / StarPremium sponsor.
           </p>
           {isPremiumTier ? (
             <div className="mt-2 space-y-1 text-[13px]">
@@ -349,32 +331,14 @@ function StarterBenefitsCard({ data, setTab }: { data: MemberPortalData; setTab:
                 <strong className="text-zinc-100">{peso(earn.productComm)}</strong>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Pending cutoff (monthly)</span>
+                <span className="text-zinc-400">FLOATING (LP)</span>
                 <strong className="text-amber-300">{peso(earn.productCommPending)}</strong>
               </div>
-              {!data.lpEligible && (
-                <p className="text-[11px] text-amber-300/90">
-                  ⚠️ Product Commission is credited only once you meet the 5 LP maintenance requirement.
-                </p>
-              )}
               <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-prodcomm')}>
                 View Product Commission tab →
               </button>
             </div>
-          ) : isStarter ? (
-            <p className="mt-2 text-[12px] leading-relaxed text-zinc-500">
-              As a <strong className="text-zinc-300">Starter</strong>, your repeat product orders earn your direct
-              Premium/StarPremium sponsor {peso(b.productCommPerBottle)} per bottle (once they meet the 5 LP
-              maintenance). Upgrade to <strong className="text-zinc-300">Premium</strong> or{' '}
-              <strong className="text-zinc-300">StarPremium</strong> to receive this commission on your own
-              direct Starters' repeat orders.
-            </p>
-          ) : (
-            <p className="mt-2 text-[12px] text-zinc-500">Credited to Premium/StarPremium accounts that meet the 5 LP maintenance requirement.</p>
-          )}
-          <p className="mt-2 border-t border-dashed border-line pt-2 text-[11px] text-zinc-500">
-            Product Commission is credited <strong className="text-zinc-300">monthly, together with the Unilevel Commission</strong>.
-          </p>
+          ) : null}
         </div>
       </div>
     </div>
@@ -557,18 +521,14 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Unilevel Released" value={peso(earn.unilevel)} accent sub="Credited to wallet" />
-        <Stat label="Pending Cutoff" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} sub="Released monthly at cutoff" />
+        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
         <Stat label="My LP (Maintenance)" value={`${data.lp} LP`} sub={data.lpEligible ? 'Eligible ✓ (≥ 5 LP)' : `Need ${lpNeeded} more LP to qualify`} />
         <Stat label="Compression" value="Dynamic" sub="Ineligible/Starter uplines are skipped, not charged a tier" />
       </div>
 
       <div className="card">
         <h3 className="text-[16px] font-bold text-gold">📶 Unilevel Commission Matrix (₱ per bottle)</h3>
-        <p className="mt-1 text-[12px] text-zinc-500">
-          Paid on product activations in your network across up to 10 compressed levels. Only members with at least
-          5 LP maintenance qualify; Starter and under-maintained uplines are compressed out without consuming a tier.
-          With Cutoff Hold ON, earnings show immediately but become withdrawable after the monthly cutoff.
-        </p>
+        
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
           {d.rates.map((r, i) => (
             <div key={i} className="rounded-lg border border-line bg-[#0a0a0a] px-3 py-2 text-center">
@@ -577,11 +537,7 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
             </div>
           ))}
         </div>
-        {!data.lpEligible && (
-          <p className="mt-3 text-[12px] text-amber-300">
-            ⚠️ You have {data.lp} LP — activate {lpNeeded} more LP worth of products this period to qualify for Unilevel commissions.
-          </p>
-        )}
+        
       </div>
 
       {d.levelTotals.length > 0 && (
@@ -606,12 +562,7 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
 
       <div className="card" style={{ borderColor: '#065f46' }}>
         <h3 className="text-[16px] font-bold text-emerald-400">🧾 Request Unilevel Codes</h3>
-        <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
-          Unilevel Codes are a <strong className="text-zinc-300">separate code series (UNI-…)</strong> from Product Commission codes (PCC-…).
-          Request them here <strong className="text-zinc-300">without the Product Orders checkout</strong> — Admin reviews each request and
-          approved codes are added to your <strong className="text-zinc-300">My Products</strong> vault. Activate them to earn LP
-          (5 LP keeps you qualified) and generate Unilevel commissions up your chain.
-        </p>
+        
         <form
           className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
           onSubmit={async (e) => {
@@ -676,7 +627,7 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
                 <tr key={l.id}>
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
                   <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
                 </tr>
               ))}
@@ -702,42 +653,14 @@ function ProductCommTab({ data, post, busy }: MemberPortalProps & { post: PostFn
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
-        <Stat label="Pending Cutoff" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} sub="Released monthly with Unilevel" />
+        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
         <Stat label="Starter Bottles Credited" value={String(d.bottles)} sub="From direct Starter repeat orders" />
         <Stat label="Rate per Bottle" value={peso(d.perBottle)} sub="Direct sponsor only" />
       </div>
 
       <div className="card" style={{ borderColor: '#0e7490' }}>
-        <h3 className="text-[16px] font-bold text-cyan-300">🧴 How Product Commission Works</h3>
-        <div className="mt-2 space-y-1 text-[13px] leading-relaxed text-zinc-400">
-          <p>1. Your <strong className="text-zinc-200">direct Starter</strong> member re-orders products and activates a <strong className="text-zinc-200">Product Code</strong> (issued from Product Orders — separate from package codes).</p>
-          <p>2. You earn <strong className="text-zinc-200">{peso(d.perBottle)} per bottle</strong> if you are <strong className="text-zinc-200">Premium or StarPremium</strong> AND have met the <strong className="text-zinc-200">5 LP maintenance</strong>.</p>
-          <p>3. Earnings are <strong className="text-zinc-200">held as Pending Cutoff</strong> and released monthly together with Unilevel.</p>
-        </div>
-        {isPremiumTier ? (
-          <p className="mt-3 text-[13px]">
-            Your status: <strong className="text-zinc-100">{data.user.rank}</strong> · {data.lp} LP —{' '}
-            {data.lpEligible
-              ? <strong className="text-emerald-400">Eligible ✓ You earn on your direct Starters&apos; repeat orders.</strong>
-              : <strong className="text-amber-300">Need {lpNeeded} more LP to start earning.</strong>}
-          </p>
-        ) : isStarter ? (
-          <p className="mt-3 text-[13px] text-zinc-400">
-            You are a <strong className="text-zinc-200">Starter</strong>: your own repeat orders earn this commission for your direct
-            Premium/StarPremium sponsor. <strong className="text-zinc-200">Upgrade to Premium or StarPremium</strong> (Profile → Upgrade Account)
-            to earn Product Commission on your direct Starters&apos; repeat orders.
-          </p>
-        ) : null}
-      </div>
-
-      <div className="card" style={{ borderColor: '#0e7490' }}>
         <h3 className="text-[16px] font-bold text-cyan-300">🧾 Request Product Codes</h3>
-        <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
-          Request Product Codes (separate <strong className="text-zinc-300">PCC-…</strong> series, distinct from Unilevel UNI-… codes) for repeat orders <strong className="text-zinc-300">without the Product Orders checkout</strong>.
-          Admin reviews each request — approved codes are added to your <strong className="text-zinc-300">My Products</strong> vault,
-          ready to activate (for your own LP maintenance) or transfer to a member. Codes you activate yourself earn your
-          direct sponsor the Product Commission when you are their Starter downline.
-        </p>
+        
         <form
           className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
           onSubmit={async (e) => {
@@ -802,7 +725,7 @@ function ProductCommTab({ data, post, busy }: MemberPortalProps & { post: PostFn
                 <tr key={l.id}>
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
                   <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
                 </tr>
               ))}
@@ -1087,45 +1010,106 @@ function EncashTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) {
 }
 
 /* ============================ PACKAGE ORDERS ============================ */
-function PkgOrdersTab(props: MemberPortalProps & { post: PostFn; busy: boolean; setTab: (t: string) => void }) {
+/* ============================ PURCHASING ============================ */
+function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean; setTab: (t: string) => void }) {
   const { data, post, busy } = props;
-  const [itemId, setItemId] = React.useState(0);
-  const [qty, setQty] = React.useState(1);
-  const [mop, setMop] = React.useState('Cash (Walk-in)');
-  const grouped = groupPins(data.packagePins);
-  void grouped;
-  const orders = data.orders.filter((o) => !isProductOrder(o.order_details, data.products.map((p) => p.pkg_name)));
+  const [lpItem, setLpItem] = React.useState(0);
+  const [lpQty, setLpQty] = React.useState(1);
+  const [lpMop, setLpMop] = React.useState('Cash (Walk-in)');
+  const [pkgItem, setPkgItem] = React.useState(0);
+  const [pkgQty, setPkgQty] = React.useState(1);
+  const [pkgMop, setPkgMop] = React.useState('Cash (Walk-in)');
+  const orders = data.orders.filter((o) => !/^(UNILEVEL )?CODE REQUEST:/i.test(o.order_details || ''));
 
   return (
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="card">
-          <h3 className="text-[15px] font-bold text-gold">📦 Purchase Package</h3>
-          <p className="text-[12px] text-zinc-500">Order registration packages (Starter, Premium, StarPremium)</p>
+        <div className="card" style={{ borderColor: '#5b21b6' }}>
+          <h3 className="text-[15px] font-bold text-violet-400">🛒 LP (Retail)</h3>
           <form
             className="mt-3 space-y-3"
-            onSubmit={async (e) => { e.preventDefault(); await post({ action: 'order', type: 'package', item_id: itemId, qty, payment_method: mop }); }}
+            onSubmit={async (e) => { e.preventDefault(); await post({ action: 'order', type: 'product', item_id: lpItem, qty: lpQty, payment_method: lpMop }); }}
           >
-            <select className="select" required value={itemId} onChange={(e) => setItemId(Number(e.target.value))}>
-              <option value={0}>Select Package...</option>
-              {data.packages.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} ({peso(p.pkg_price)})</option>)}
+            <select className="select" required value={lpItem} onChange={(e) => setLpItem(Number(e.target.value))}>
+              <option value={0}>Select Product...</option>
+              {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name}</option>)}
             </select>
             <div className="form-row">
-              <div><span className="lbl">Quantity</span><input className="input" type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value))} /></div>
+              <div><span className="lbl">Quantity</span><input className="input" type="number" min={1} value={lpQty} onChange={(e) => setLpQty(Number(e.target.value))} /></div>
               <div>
                 <span className="lbl">Mode of Payment</span>
-                <select className="select" value={mop} onChange={(e) => setMop(e.target.value)}>
+                <select className="select" value={lpMop} onChange={(e) => setLpMop(e.target.value)}>
                   <option>Cash (Walk-in)</option><option>Bank Transfer</option>
                 </select>
               </div>
             </div>
-            <button type="submit" disabled={busy || !itemId} className="btn-gold w-full disabled:opacity-40">SUBMIT PACKAGE ORDER</button>
+            <button type="submit" disabled={busy || !lpItem} className="btn-gold w-full disabled:opacity-40">SUBMIT ORDER</button>
           </form>
+        </div>
+
+        <div className="card">
+          <h3 className="text-[15px] font-bold text-gold">📦 Packages</h3>
+          <form
+            className="mt-3 space-y-3"
+            onSubmit={async (e) => { e.preventDefault(); await post({ action: 'order', type: 'package', item_id: pkgItem, qty: pkgQty, payment_method: pkgMop }); }}
+          >
+            <select className="select" required value={pkgItem} onChange={(e) => setPkgItem(Number(e.target.value))}>
+              <option value={0}>Select Package...</option>
+              {data.packages.map((p) => <option key={p.id} value={p.id}>{p.pkg_name}</option>)}
+            </select>
+            <div className="form-row">
+              <div><span className="lbl">Quantity</span><input className="input" type="number" min={1} value={pkgQty} onChange={(e) => setPkgQty(Number(e.target.value))} /></div>
+              <div>
+                <span className="lbl">Mode of Payment</span>
+                <select className="select" value={pkgMop} onChange={(e) => setPkgMop(e.target.value)}>
+                  <option>Cash (Walk-in)</option><option>Bank Transfer</option>
+                </select>
+              </div>
+            </div>
+            <button type="submit" disabled={busy || !pkgItem} className="btn-gold w-full disabled:opacity-40">SUBMIT ORDER</button>
+          </form>
+        </div>
+
+        <div className="card" style={{ borderColor: '#5b21b6' }}>
+          <h3 className="text-[15px] font-bold text-violet-400">🔑 LP Vault</h3>
+          <div className="mt-3 rounded-lg border border-line bg-[#0a0a0a] px-3 py-3 text-center">
+            <div className="text-[10px] uppercase text-zinc-500">LP Codes Available</div>
+            <div className="text-2xl font-extrabold text-violet-400">{data.vaultCounts.products}</div>
+          </div>
+          <div className="tbl-wrap mt-3">
+            <table className="tbl">
+              <thead><tr><th>Date</th><th>Product</th><th>Activate</th></tr></thead>
+              <tbody>
+                {data.productPins.length === 0 && <tr><td colSpan={3} className="text-center text-zinc-500">No unused LP codes.</td></tr>}
+                {data.productPins.map((p) => (
+                  <ProductPinRow key={p.id} pin={p} post={post} busy={busy} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <h4 className="mt-5 text-[13px] font-bold text-amber-300">✅ Products You Activated</h4>
+          <div className="tbl-wrap mt-2">
+            <table className="tbl">
+              <thead><tr><th>Activated On</th><th>Product</th><th>Code</th><th>Activated For</th><th>Status</th></tr></thead>
+              <tbody>
+                {data.selfActivatedProducts.length === 0 && <tr><td colSpan={5} className="text-center text-zinc-500">No products activated by you yet.</td></tr>}
+                {data.selfActivatedProducts.map((p) => (
+                  <tr key={p.id}>
+                    <td className="text-zinc-500">{dt(p.used_at, 'm/d/Y h:i A')}</td>
+                    <td className="font-bold text-amber-300">{p.package_type}</td>
+                    <td><code className="text-[11px]">{p.pin_code}</code></td>
+                    <td>{p.recipient || ''}</td>
+                    <td><Badge tone="ok">Active</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="card" style={{ borderColor: '#8a6d1f' }}>
           <h3 className="text-[15px] font-bold text-gold">🔑 Package Vault</h3>
-          <p className="text-[11px] text-zinc-500">AVAILABLE PACKAGE CODES FOR REGISTRATION.</p>
           <div className="mt-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
             <VaultStat label="Activated (this month)" value={data.vaultCounts.activatedThisMonth} tone="text-emerald-400" />
             <VaultStat label="Available" value={data.vaultCounts.packages} tone="text-gold" />
@@ -1147,7 +1131,27 @@ function PkgOrdersTab(props: MemberPortalProps & { post: PostFn; busy: boolean; 
       </div>
 
       <div className="card">
-        <h3 className="text-[15px] font-bold text-sky-400">📦 Package Orders History</h3>
+        <h3 className="text-[15px] font-bold text-emerald-400">⚡ Admin Activation History</h3>
+        <div className="tbl-wrap mt-3">
+          <table className="tbl">
+            <thead><tr><th>Activated On</th><th>Product</th><th>Code</th><th>Status</th></tr></thead>
+            <tbody>
+              {data.adminActivatedProducts.length === 0 && <tr><td colSpan={4} className="text-center text-zinc-500">No products have been activated by an administrator yet.</td></tr>}
+              {data.adminActivatedProducts.map((p) => (
+                <tr key={p.id}>
+                  <td className="text-zinc-500">{dt(p.used_at, 'm/d/Y h:i A')}</td>
+                  <td className="font-bold text-emerald-300">{p.package_type}</td>
+                  <td><code className="text-[11px]">{p.pin_code}</code></td>
+                  <td><Badge tone="ok">Activated by Admin</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 className="text-[15px] font-bold text-zinc-100">🧾 Purchase History</h3>
         <OrderHistory orders={orders} tone="text-zinc-200" />
       </div>
     </div>
@@ -1219,110 +1223,6 @@ export function OrderHistory({ orders, tone }: { orders: { id: number; created_a
   );
 }
 
-/* ============================ PRODUCT ORDERS ============================ */
-function ProdOrdersTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) {
-  const { data, post, busy } = props;
-  const [itemId, setItemId] = React.useState(0);
-  const [qty, setQty] = React.useState(1);
-  const [mop, setMop] = React.useState('Cash (Walk-in)');
-  const orders = data.orders.filter((o) => isProductOrder(o.order_details, data.products.map((p) => p.pkg_name)));
-
-  return (
-    <div className="animate-fadeIn space-y-4">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="card">
-          <h3 className="text-[15px] font-bold text-violet-400">🛍️ Purchase Product</h3>
-          <p className="text-[12px] text-zinc-500">Order retail products with LP (Primo Parfum, etc.)</p>
-          <form
-            className="mt-3 space-y-3"
-            onSubmit={async (e) => { e.preventDefault(); await post({ action: 'order', type: 'product', item_id: itemId, qty, payment_method: mop }); }}
-          >
-            <select className="select" required value={itemId} onChange={(e) => setItemId(Number(e.target.value))}>
-              <option value={0}>Select Product...</option>
-              {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} ({peso(p.pkg_price)})</option>)}
-            </select>
-            <div className="form-row">
-              <div><span className="lbl">Quantity</span><input className="input" type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value))} /></div>
-              <div>
-                <span className="lbl">Mode of Payment</span>
-                <select className="select" value={mop} onChange={(e) => setMop(e.target.value)}>
-                  <option>Cash (Walk-in)</option><option>Bank Transfer</option>
-                </select>
-              </div>
-            </div>
-            <button type="submit" disabled={busy || !itemId} className="btn-gold w-full disabled:opacity-40">SUBMIT PRODUCT ORDER</button>
-          </form>
-        </div>
-
-        <div className="card" style={{ borderColor: '#5b21b6' }}>
-          <h3 className="text-[15px] font-bold text-violet-400">🔑 Product Vault</h3>
-          <p className="text-[11px] text-zinc-500">AVAILABLE PRODUCT CODES FOR ACTIVATION.</p>
-          <div className="mt-3 rounded-lg border border-line bg-[#0a0a0a] px-3 py-3 text-center">
-            <div className="text-[10px] uppercase text-zinc-500">Product Codes Available</div>
-            <div className="text-2xl font-extrabold text-violet-400">{data.vaultCounts.products}</div>
-          </div>
-          <div className="tbl-wrap mt-3">
-            <table className="tbl">
-              <thead><tr><th>Date</th><th>Product</th><th>Activate</th></tr></thead>
-              <tbody>
-                {data.productPins.length === 0 && <tr><td colSpan={3} className="text-center text-zinc-500">No unused product codes.</td></tr>}
-                {data.productPins.map((p) => (
-                  <ProductPinRow key={p.id} pin={p} post={post} busy={busy} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <h4 className="mt-5 text-[13px] font-bold text-amber-300">✅ Products You Activated</h4>
-          <div className="tbl-wrap mt-2">
-            <table className="tbl">
-              <thead><tr><th>Activated On</th><th>Product</th><th>Code</th><th>Activated For</th><th>Status</th></tr></thead>
-              <tbody>
-                {data.selfActivatedProducts.length === 0 && <tr><td colSpan={5} className="text-center text-zinc-500">No products activated by you yet.</td></tr>}
-                {data.selfActivatedProducts.map((p) => (
-                  <tr key={p.id}>
-                    <td className="text-zinc-500">{dt(p.used_at, 'm/d/Y h:i A')}</td>
-                    <td className="font-bold text-amber-300">{p.package_type}</td>
-                    <td><code className="text-[11px]">{p.pin_code}</code></td>
-                    <td>{p.recipient || ''}</td>
-                    <td><Badge tone="ok">Active</Badge></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <h3 className="text-[15px] font-bold text-emerald-400">⚡ Admin Activation History</h3>
-        <p className="text-[12px] text-zinc-500">Products activated by the administrator. Separate from the Approved order list below.</p>
-        <div className="tbl-wrap mt-3">
-          <table className="tbl">
-            <thead><tr><th>Activated On</th><th>Product</th><th>Code</th><th>Status</th></tr></thead>
-            <tbody>
-              {data.adminActivatedProducts.length === 0 && <tr><td colSpan={4} className="text-center text-zinc-500">No products have been activated by an administrator yet.</td></tr>}
-              {data.adminActivatedProducts.map((p) => (
-                <tr key={p.id}>
-                  <td className="text-zinc-500">{dt(p.used_at, 'm/d/Y h:i A')}</td>
-                  <td className="font-bold text-emerald-300">{p.package_type}</td>
-                  <td><code className="text-[11px]">{p.pin_code}</code></td>
-                  <td><Badge tone="ok">Activated by Admin</Badge></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="card">
-        <h3 className="text-[15px] font-bold text-violet-400">🛍️ Product Orders History</h3>
-        <OrderHistory orders={orders} tone="text-violet-300" />
-      </div>
-    </div>
-  );
-}
-
 function ProductPinRow({ pin, post, busy }: { pin: PinRow; post: PostFn; busy: boolean }) {
   const [target, setTarget] = React.useState('');
   return (
@@ -1368,7 +1268,7 @@ function ProductVaultTab(props: MemberPortalProps & { post: PostFn; busy: boolea
         Your purchased products are held here. <b>Activate</b> a product to distribute unilevel commissions to your uplines, or <b>Transfer</b> it to another member who can activate it.
       </p>
       {data.productPins.length === 0 ? (
-        <Empty icon="🛒">No products in your vault. Go to Product Orders to buy products.</Empty>
+        <Empty icon="🛒">No products in your vault.</Empty>
       ) : (
         <div className="tbl-wrap mt-4">
           <table className="tbl">
@@ -1593,7 +1493,7 @@ function ProfileTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) 
             <strong className="text-violet-300">{peso(earn.pairingReleased + earn.tri)} <small className="font-normal">({data.activeAccount.pairing_count} tri-leg triggers / {earn.gc} GC)</small></strong>
           </div>
           <div className="flex justify-between"><span>Unilevel Commission</span><strong>{peso(earn.unilevel)}</strong></div>
-          {earn.unilevelPendingCutoff > 0 && <div className="flex justify-between text-amber-300"><span>⏳ Unilevel Pending Cutoff</span><strong>{peso(earn.unilevelPendingCutoff)}</strong></div>}
+          <div className="flex justify-between text-amber-300"><span>FLOATING Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff + earn.productCommPending)}</strong></div>
           <div className="flex justify-between"><span>Available GC</span><strong className="text-sky-400">{earn.gc}</strong></div>
           <div className="flex justify-between border-t border-dashed border-line pt-2 font-bold"><span>TOTAL EARNINGS</span><strong className="text-gold">{peso(earn.totalEarned)}</strong></div>
           <div className="flex justify-between"><span>Total Encashed</span><strong className="text-red-400">-{peso(earn.totalEncashed)}</strong></div>

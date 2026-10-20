@@ -21,6 +21,7 @@ import {
   userById,
 } from './engine/accounts';
 import { firstRowsComplete, legMetricDownlineCount } from './engine/placement';
+import { releaseMaturedUnilevelCommissions } from './engine/unilevel';
 import { getTreeCells, type TreeCell } from './engine/tree';
 
 /* =====================================================================
@@ -187,6 +188,9 @@ export async function resolveMemberAccounts(
 }
 
 export async function memberPortalData(userId: number, activeNode: string): Promise<MemberPortalData | null> {
+  // Monthly settlement (1st of the month): matured Floating (LP)
+  // commissions move into wallet/earnings. Idempotent; no-op mid-month.
+  await releaseMaturedUnilevelCommissions();
   await ensureSettings();
   const user = await userById(Number(userId));
   if (!user) return null;
