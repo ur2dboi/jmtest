@@ -24,9 +24,11 @@ function randomCode(): string {
   return out;
 }
 
-export async function generatePinRow(packageType: string, isProduct: boolean, purchaserId: number): Promise<number> {
+export async function generatePinRow(packageType: string, isProduct: boolean, purchaserId: number, series = ''): Promise<number> {
   for (let attempt = 0; attempt < 8; attempt++) {
-    const code = randomCode();
+    // Request-flow codes carry their own series prefix so the code type is
+    // visible everywhere: UNI-... (Unilevel) vs PCC-... (Product Commission).
+    const code = series ? `${series}-${randomCode()}` : randomCode();
     const rows = await one<{ id: number }>(
       `INSERT INTO pins (pin_code, package_type, is_product, purchaser_id, status, created_at)
        VALUES ($1,$2,$3,$4,'unused', now())

@@ -2,7 +2,7 @@ import { exec, one, q, scalar } from '@/lib/db';
 import { ensureSettings, saveSettings, settingBool } from '@/lib/settings';
 import { hashPassword, validAlnumPassword, passwordPolicyMessage } from '@/lib/auth';
 import { adminActor, audit, body, err, fail, ok } from '@/lib/http';
-import type { PackageRow, PinRow, UserRow } from '@/lib/types';
+import type { OrderRow, PackageRow, PinRow, UserRow } from '@/lib/types';
 import {
   auditLog,
   invalidateUser,
@@ -24,7 +24,7 @@ import {
   wipeGhostPoints,
 } from '@/lib/engine/rebuild';
 import { clearAlertHistory } from '@/lib/queries';
-import { approveOrder, rejectOrder, transferOrder } from '@/lib/order-actions';
+import { approveOrder, generatePinRow, rejectOrder, transferOrder } from '@/lib/order-actions';
 import { restoreBackup } from '@/lib/backup';
 
 export const runtime = 'nodejs';
@@ -249,6 +249,35 @@ export async function POST(req: Request) {
         return r.ok ? ok({ message: `Order #${id} transferred to @${String(b.target)}.` }) : fail(r.error!);
       }
       return fail('Unknown order mode.');
+    }
+
+    /* ------------- code requests (Product Commission + Unilevel) ------------- */
+    if (
+      action === 'code-request-approve' || action === 'code-request-reject' ||
+      action === 'unilevel-code-approve' || action === 'unilevel-code-reject'
+    ) {
+      const isUni = action.startsWith('unilevel');
+      const marker = isUni ? 'UNILEVEL CODE REQUEST:' : 'CODE REQUEST:';
+      const label = isUni ? 'Unilevel Code' : 'Product Code';
+      const orderId = Number(b.order_id ?? 0);
+      const order = await one<OrderRow>('SELECT * FROM orders WHERE id=$1', [orderId]);
+      if (!order || !(order.order_details || '').startsWith(marker)) return fail('Code request not found.');
+      if (order.status !== 'pending') return fail('This request was already processed.');
+      if (action.endsWith('reject')) {
+        await exec(`UPDATE orders SET status='rejected' WHERE id=$1`, [orderId]);
+        await audit(actor, 'orders', `REJECT ${isUni ? 'UNILEVEL' : 'PRODUCT'} CODE REQUEST`, { orderId });
+        return ok({ message: `${label} request rejected.` });
+      }
+      const m = /CODE REQUEST:\s*(\d+)x\s*(.+)$/i.exec(order.order_details || '');
+      if (!m) return fail('Could not read this code request.');
+      const qty = Math.max(1, Number(m[1]));
+      const pkg = await one<PackageRow>('SELECT * FROM packages WHERE pkg_name=$1 AND is_product=1 AND status=1', [m[2].trim()]);
+      if (!pkg) return fail('That product is no longer available.');
+      // Separate visible code series per flow: UNI-... vs PCC-...
+      for (let i = 0; i < qty; i++) await generatePinRow(pkg.pkg_name, true, Number(order.user_id), isUni ? 'UNI' : 'PCC');
+      await exec(`UPDATE orders SET status='approved' WHERE id=$1`, [orderId]);
+      await audit(actor, 'orders', `APPROVE ${isUni ? 'UNILEVEL' : 'PRODUCT'} CODE REQUEST`, { orderId, qty, pkg: pkg.pkg_name });
+      return ok({ message: `${qty} ${label}(s) for ${pkg.pkg_name} were issued to the member's My Products vault (${isUni ? 'UNI' : 'PCC'} series).` });
     }
 
     /* ---------------- encashment ---------------- */

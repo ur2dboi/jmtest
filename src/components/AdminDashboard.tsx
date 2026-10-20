@@ -76,8 +76,8 @@ const TABS: { id: string; label: string; icon: string; badge?: (p: AdminProps) =
   { id: 'tab-sales-report', label: 'Sales Report', icon: '📈' },
   { id: 'tab-encashment-report', label: 'Encashment Report', icon: '🧾' },
   { id: 'tab-payables-report', label: 'Payables Report', icon: '💵' },
-  { id: 'tab-unilevel', label: 'Unilevel', icon: '📶' },
-  { id: 'tab-prodcomm', label: 'Product Commission', icon: '🧴' },
+  { id: 'tab-unilevel', label: 'Unilevel', icon: '📶', badge: (p) => p.unilevelReport.codeRequests.filter((r) => r.status === 'pending').length },
+  { id: 'tab-prodcomm', label: 'Product Commission', icon: '🧴', badge: (p) => p.productCommReport.codeRequests.filter((r) => r.status === 'pending').length },
   { id: 'tab-tree', label: 'Genealogy Viewer', icon: '🌳' },
   { id: 'tab-logs', label: 'Activity Logs', icon: '📜' },
   { id: 'tab-settings', label: 'Comp. Plan', icon: '⚙️' },
@@ -172,8 +172,8 @@ export default function AdminDashboard(props: AdminProps) {
         {tab === 'tab-sales-report' && <SalesTab {...props} go={go} />}
         {tab === 'tab-encashment-report' && <EncashReportTab {...props} go={go} />}
         {tab === 'tab-payables-report' && <PayablesTab overview={props.overview} />}
-        {tab === 'tab-unilevel' && <UnilevelAdminTab report={props.unilevelReport} />}
-        {tab === 'tab-prodcomm' && <ProductCommAdminTab report={props.productCommReport} />}
+        {tab === 'tab-unilevel' && <UnilevelAdminTab report={props.unilevelReport} post={post} busy={busy} />}
+        {tab === 'tab-prodcomm' && <ProductCommAdminTab report={props.productCommReport} post={post} busy={busy} />}
         {tab === 'tab-tree' && <TreeTabAdmin {...props} />}
         {tab === 'tab-logs' && <LogsTab {...props} post={post} busy={busy} />}
         {tab === 'tab-settings' && <SettingsTab {...props} post={post} busy={busy} />}
@@ -1164,7 +1164,7 @@ function LogsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
 }
 
 /* ============================ UNILEVEL (ADMIN) ============================ */
-function UnilevelAdminTab({ report }: { report: UnilevelReport }) {
+function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post: PostFn; busy: boolean }) {
   const r = report;
   return (
     <div className="animate-fadeIn space-y-4">
@@ -1186,6 +1186,50 @@ function UnilevelAdminTab({ report }: { report: UnilevelReport }) {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="card" style={{ borderColor: '#065f46' }}>
+        <h3 className="text-[15px] font-bold text-emerald-400">🧾 Unilevel Code Requests</h3>
+        <p className="mt-1 text-[12px] text-zinc-500">Members request Unilevel Codes (separate UNI-… series) from their Unilevel tab — no Product Orders checkout. Approving issues the codes straight into the member&apos;s My Products vault. Product Commission code requests (PCC-…) are handled in the Product Commission tab.</p>
+        {report.codeRequests.filter((r) => r.status === 'pending').length === 0 && (
+          <p className="mt-3 text-[13px] text-zinc-500">No pending requests.</p>
+        )}
+        <div className="mt-2 space-y-2">
+          {report.codeRequests.filter((r) => r.status === 'pending').map((r) => (
+            <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-[#0a0a0a] px-3 py-2">
+              <div className="text-[13px]">
+                <strong className="text-zinc-100">@{r.username}</strong>{' '}
+                <span className="text-zinc-400">{String(r.order_details || '').replace(/^UNILEVEL CODE REQUEST:\s*/i, '')}</span>{' '}
+                <span className="text-zinc-600">· {dt(r.created_at)}</span>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" disabled={busy} className="btn !bg-emerald-700 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-emerald-600 disabled:opacity-40" onClick={async () => { await post({ action: 'unilevel-code-approve', order_id: r.id }); }}>
+                  ✓ Approve &amp; Issue Codes
+                </button>
+                <button type="button" disabled={busy} className="btn !bg-red-900 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-red-800 disabled:opacity-40" onClick={async () => { await post({ action: 'unilevel-code-reject', order_id: r.id }); }}>
+                  ✕ Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {report.codeRequests.filter((r) => r.status !== 'pending').length > 0 && (
+          <div className="tbl-wrap mt-3">
+            <table className="tbl">
+              <thead><tr><th>Date</th><th>Member</th><th>Request</th><th>Status</th></tr></thead>
+              <tbody>
+                {report.codeRequests.filter((r) => r.status !== 'pending').map((r) => (
+                  <tr key={r.id}>
+                    <td className="text-zinc-500">{dt(r.created_at)}</td>
+                    <td>@{r.username}</td>
+                    <td className="!whitespace-normal">{String(r.order_details || '').replace(/^UNILEVEL CODE REQUEST:\s*/i, '')}</td>
+                    <td>{r.status === 'approved' ? <span className="font-semibold text-emerald-400">✓ Approved</span> : <span className="font-semibold text-red-400">✕ Rejected</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -1236,7 +1280,7 @@ function UnilevelAdminTab({ report }: { report: UnilevelReport }) {
 }
 
 /* ============================ PRODUCT COMMISSION (ADMIN) ============================ */
-function ProductCommAdminTab({ report }: { report: ProductCommReport }) {
+function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport; post: PostFn; busy: boolean }) {
   const r = report;
   return (
     <div className="animate-fadeIn space-y-4">
@@ -1256,6 +1300,50 @@ function ProductCommAdminTab({ report }: { report: ProductCommReport }) {
           Earnings are held as Pending Cutoff and released monthly together with Unilevel. Rate is editable in
           Comp. Plan settings (Starter Repeat-Order Product Comm).
         </p>
+      </div>
+
+      <div className="card" style={{ borderColor: '#0e7490' }}>
+        <h3 className="text-[15px] font-bold text-cyan-300">🧾 Product Code Requests</h3>
+        <p className="mt-1 text-[12px] text-zinc-500">Members request Product Codes from their Product Commission tab (no Product Orders checkout). Approving issues the codes straight into the member&apos;s My Products vault.</p>
+        {report.codeRequests.filter((r) => r.status === 'pending').length === 0 && (
+          <p className="mt-3 text-[13px] text-zinc-500">No pending requests.</p>
+        )}
+        <div className="mt-2 space-y-2">
+          {report.codeRequests.filter((r) => r.status === 'pending').map((r) => (
+            <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-[#0a0a0a] px-3 py-2">
+              <div className="text-[13px]">
+                <strong className="text-zinc-100">@{r.username}</strong>{' '}
+                <span className="text-zinc-400">{String(r.order_details || '').replace(/^CODE REQUEST:\s*/i, '')}</span>{' '}
+                <span className="text-zinc-600">· {dt(r.created_at)}</span>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" disabled={busy} className="btn !bg-emerald-700 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-emerald-600 disabled:opacity-40" onClick={async () => { await post({ action: 'code-request-approve', order_id: r.id }); }}>
+                  ✓ Approve &amp; Issue Codes
+                </button>
+                <button type="button" disabled={busy} className="btn !bg-red-900 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-red-800 disabled:opacity-40" onClick={async () => { await post({ action: 'code-request-reject', order_id: r.id }); }}>
+                  ✕ Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {report.codeRequests.filter((r) => r.status !== 'pending').length > 0 && (
+          <div className="tbl-wrap mt-3">
+            <table className="tbl">
+              <thead><tr><th>Date</th><th>Member</th><th>Request</th><th>Status</th></tr></thead>
+              <tbody>
+                {report.codeRequests.filter((r) => r.status !== 'pending').map((r) => (
+                  <tr key={r.id}>
+                    <td className="text-zinc-500">{dt(r.created_at)}</td>
+                    <td>@{r.username}</td>
+                    <td className="!whitespace-normal">{String(r.order_details || '').replace(/^CODE REQUEST:\s*/i, '')}</td>
+                    <td>{r.status === 'approved' ? <span className="font-semibold text-emerald-400">✓ Approved</span> : <span className="font-semibold text-red-400">✕ Rejected</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">

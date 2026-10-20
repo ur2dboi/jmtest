@@ -206,6 +206,30 @@ export async function POST(req: Request) {
       return ok({ message: `Account upgraded from ${res.from} to ${res.to}! Points differential has been recalculated.` });
     }
 
+    /* ------------- code requests (Product Commission + Unilevel) ------------- */
+    if (action === 'request-product-codes' || action === 'request-unilevel-codes') {
+      if (loggedInAsChild) return fail('Child Accounts cannot request codes. Please use the Mother Account.');
+      const isUni = action === 'request-unilevel-codes';
+      const itemId = Number(b.item_id ?? 0);
+      const qty = Math.min(50, Math.max(1, Number(b.qty ?? 1)));
+      const pkg = await one<PackageRow>('SELECT * FROM packages WHERE id=$1 AND status=1 AND is_product=1', [itemId]);
+      if (!pkg) return fail('Please select a product.');
+      await q(
+        `INSERT INTO orders (user_id, order_details, proof_image, status) VALUES ($1,$2,$3,'pending')`,
+        [
+          user.id,
+          `${isUni ? 'UNILEVEL CODE REQUEST' : 'CODE REQUEST'}: ${qty}x ${pkg.pkg_name}`,
+          isUni ? 'Unilevel Code Request - no payment checkout' : 'Product Code Request - no payment checkout',
+        ],
+      );
+      await audit(actor, 'purchase', isUni ? 'REQUEST UNILEVEL CODES' : 'REQUEST PRODUCT CODES', { qty, pkg: pkg.pkg_name });
+      return ok({
+        message: isUni
+          ? `Request submitted! Once Admin approves it, ${qty} Unilevel Code(s) (UNI series) for ${pkg.pkg_name} will be added to your My Products vault.`
+          : `Request submitted! Once Admin approves it, ${qty} Product Code(s) (PCC series) for ${pkg.pkg_name} will be added to your My Products vault.`,
+      });
+    }
+
     /* ---------------- orders ---------------- */
     if (action === 'order') {
       if (loggedInAsChild) return fail('Child Accounts are not permitted to make purchases.');

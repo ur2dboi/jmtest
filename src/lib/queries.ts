@@ -122,6 +122,8 @@ export interface MemberPortalData {
   ledger: LedgerRow[];
   encashLedger: LedgerRow[];
   orders: OrderRow[];
+  codeRequests: OrderRow[];
+  unilevelCodeRequests: OrderRow[];
   selfActivatedProducts: (PinRow & { recipient?: string })[];
   adminActivatedProducts: PinRow[];
   gateComplete: boolean;
@@ -265,6 +267,14 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
     [ledgerUserId],
   );
   const orders = await q<OrderRow>(`SELECT * FROM orders WHERE user_id=$1 ORDER BY id DESC LIMIT 50`, [userId]);
+  const codeRequests = await q<OrderRow>(
+    `SELECT * FROM orders WHERE user_id=$1 AND order_details LIKE 'CODE REQUEST:%' ORDER BY id DESC LIMIT 20`,
+    [userId],
+  );
+  const unilevelCodeRequests = await q<OrderRow>(
+    `SELECT * FROM orders WHERE user_id=$1 AND order_details LIKE 'UNILEVEL CODE REQUEST:%' ORDER BY id DESC LIMIT 20`,
+    [userId],
+  );
 
   const selfActivated = await q<PinRow & { recipient_id: number }>(
     `SELECT p.*, p.used_by AS recipient_id FROM pins p
@@ -325,6 +335,8 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
     ledger,
     encashLedger,
     orders,
+    codeRequests,
+    unilevelCodeRequests,
     selfActivatedProducts,
     adminActivatedProducts,
     gateComplete: ma ? await firstRowsComplete(Number(ma.id)) : false,
@@ -1165,6 +1177,7 @@ export interface UnilevelReport {
   rates: number[];
   rows: UnilevelReportRow[];
   recent: (LedgerRow & { username: string })[];
+  codeRequests: (OrderRow & { username: string })[];
 }
 
 export async function unilevelReport(): Promise<UnilevelReport> {
@@ -1194,6 +1207,11 @@ export async function unilevelReport(): Promise<UnilevelReport> {
        FROM ledger l LEFT JOIN users u ON u.id = l.user_id
       WHERE l.note LIKE 'Unilevel Comm%' ORDER BY l.id DESC LIMIT 50`,
   );
+  const codeRequests = await q<OrderRow & { username: string }>(
+    `SELECT o.*, COALESCE(u.username, '') AS username
+       FROM orders o LEFT JOIN users u ON u.id = o.user_id
+      WHERE o.order_details LIKE 'UNILEVEL CODE REQUEST:%' ORDER BY o.id DESC LIMIT 50`,
+  );
   return {
     released: rows.reduce((s, r) => s + r.released, 0),
     pending: rows.reduce((s, r) => s + r.pending, 0),
@@ -1203,6 +1221,7 @@ export async function unilevelReport(): Promise<UnilevelReport> {
     rates: unilevelMatrix(),
     rows: rows.slice(0, 100),
     recent,
+    codeRequests,
   };
 }
 
@@ -1223,6 +1242,7 @@ export interface ProductCommReport {
   perBottle: number;
   rows: ProductCommReportRow[];
   recent: (LedgerRow & { username: string })[];
+  codeRequests: (OrderRow & { username: string })[];
 }
 
 export async function productCommReport(): Promise<ProductCommReport> {
@@ -1251,6 +1271,11 @@ export async function productCommReport(): Promise<ProductCommReport> {
        FROM ledger l LEFT JOIN users u ON u.id = l.user_id
       WHERE l.note LIKE 'Product Comm%' ORDER BY l.id DESC LIMIT 50`,
   );
+  const codeRequests = await q<OrderRow & { username: string }>(
+    `SELECT o.*, COALESCE(u.username, '') AS username
+       FROM orders o LEFT JOIN users u ON u.id = o.user_id
+      WHERE o.order_details LIKE 'CODE REQUEST:%' ORDER BY o.id DESC LIMIT 50`,
+  );
   return {
     released: rows.reduce((s, r) => s + r.released, 0),
     pending: rows.reduce((s, r) => s + r.pending, 0),
@@ -1259,5 +1284,6 @@ export async function productCommReport(): Promise<ProductCommReport> {
     perBottle: settingNum('mlm_sys_product_comm_starter', 20),
     rows: rows.slice(0, 100),
     recent,
+    codeRequests,
   };
 }

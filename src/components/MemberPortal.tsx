@@ -178,8 +178,8 @@ export default function MemberPortal(props: MemberPortalProps) {
         )}
         {tab === 'mtab-transactions' && <TransactionsTab data={data} />}
         {tab === 'mtab-reports' && <ReportsTab data={data} />}
-        {tab === 'mtab-unilevel' && !isChild && <UnilevelTab data={data} />}
-        {tab === 'mtab-prodcomm' && !isChild && <ProductCommTab data={data} />}
+        {tab === 'mtab-unilevel' && !isChild && <UnilevelTab {...props} post={post} busy={busy} />}
+        {tab === 'mtab-prodcomm' && !isChild && <ProductCommTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-pkg-orders' && <PkgOrdersTab {...props} post={post} busy={busy} setTab={setTab} />}
@@ -547,10 +547,12 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
 }
 
 /* ============================ UNILEVEL ============================ */
-function UnilevelTab({ data }: { data: MemberPortalData }) {
+function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; busy: boolean }) {
   const earn = data.earnings;
   const d = data.unilevelDetail;
   const lpNeeded = Math.max(0, 5 - data.lp);
+  const [reqProduct, setReqProduct] = React.useState(0);
+  const [reqQty, setReqQty] = React.useState(1);
   return (
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -602,6 +604,65 @@ function UnilevelTab({ data }: { data: MemberPortalData }) {
         </div>
       )}
 
+      <div className="card" style={{ borderColor: '#065f46' }}>
+        <h3 className="text-[16px] font-bold text-emerald-400">🧾 Request Unilevel Codes</h3>
+        <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
+          Unilevel Codes are a <strong className="text-zinc-300">separate code series (UNI-…)</strong> from Product Commission codes (PCC-…).
+          Request them here <strong className="text-zinc-300">without the Product Orders checkout</strong> — Admin reviews each request and
+          approved codes are added to your <strong className="text-zinc-300">My Products</strong> vault. Activate them to earn LP
+          (5 LP keeps you qualified) and generate Unilevel commissions up your chain.
+        </p>
+        <form
+          className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            await post({ action: 'request-unilevel-codes', item_id: reqProduct, qty: reqQty });
+            setReqQty(1);
+          }}
+        >
+          <div>
+            <span className="lbl">Product</span>
+            <select className="select" value={reqProduct} onChange={(e) => setReqProduct(Number(e.target.value))}>
+              <option value={0}>-- Choose Product --</option>
+              {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
+            </select>
+          </div>
+          <div>
+            <span className="lbl">Quantity (codes)</span>
+            <input type="number" min={1} max={50} className="input" value={reqQty} onChange={(e) => setReqQty(Math.max(1, Number(e.target.value) || 1))} />
+          </div>
+          <div className="flex items-end">
+            <button type="submit" disabled={busy || !reqProduct} className="btn w-full !bg-emerald-700 font-bold text-white hover:!bg-emerald-600 disabled:opacity-40 sm:w-auto">
+              Request Codes
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {data.unilevelCodeRequests.length > 0 && (
+        <div className="card">
+          <h3 className="text-[15px] font-bold text-emerald-400">My Unilevel Code Requests</h3>
+          <div className="tbl-wrap mt-2">
+            <table className="tbl">
+              <thead><tr><th>Date Requested</th><th>Request</th><th>Status</th></tr></thead>
+              <tbody>
+                {data.unilevelCodeRequests.map((o) => (
+                  <tr key={o.id}>
+                    <td className="text-zinc-500">{dt(o.created_at)}</td>
+                    <td className="!whitespace-normal">{String(o.order_details || '').replace(/^UNILEVEL CODE REQUEST:\s*/i, '')}</td>
+                    <td>
+                      {o.status === 'pending' && <span className="font-semibold text-amber-300">⏳ Pending Admin Review</span>}
+                      {o.status === 'approved' && <span className="font-semibold text-emerald-400">✓ Approved — codes in My Products</span>}
+                      {o.status === 'rejected' && <span className="font-semibold text-red-400">✕ Rejected</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <h3 className="text-[15px] font-bold text-emerald-400">Unilevel History (latest 100)</h3>
         <div className="tbl-wrap mt-2">
@@ -628,13 +689,15 @@ function UnilevelTab({ data }: { data: MemberPortalData }) {
 }
 
 /* ============================ PRODUCT COMMISSION ============================ */
-function ProductCommTab({ data }: { data: MemberPortalData }) {
+function ProductCommTab({ data, post, busy }: MemberPortalProps & { post: PostFn; busy: boolean }) {
   const earn = data.earnings;
   const d = data.productCommDetail;
   const rankNorm = (data.user.rank || '').replace(/\s+/g, '').toLowerCase();
   const isStarter = rankNorm.includes('starter');
   const isPremiumTier = !isStarter && rankNorm.includes('premium');
   const lpNeeded = Math.max(0, 5 - data.lp);
+  const [reqProduct, setReqProduct] = React.useState(0);
+  const [reqQty, setReqQty] = React.useState(1);
   return (
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -666,6 +729,65 @@ function ProductCommTab({ data }: { data: MemberPortalData }) {
           </p>
         ) : null}
       </div>
+
+      <div className="card" style={{ borderColor: '#0e7490' }}>
+        <h3 className="text-[16px] font-bold text-cyan-300">🧾 Request Product Codes</h3>
+        <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
+          Request Product Codes (separate <strong className="text-zinc-300">PCC-…</strong> series, distinct from Unilevel UNI-… codes) for repeat orders <strong className="text-zinc-300">without the Product Orders checkout</strong>.
+          Admin reviews each request — approved codes are added to your <strong className="text-zinc-300">My Products</strong> vault,
+          ready to activate (for your own LP maintenance) or transfer to a member. Codes you activate yourself earn your
+          direct sponsor the Product Commission when you are their Starter downline.
+        </p>
+        <form
+          className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            await post({ action: 'request-product-codes', item_id: reqProduct, qty: reqQty });
+            setReqQty(1);
+          }}
+        >
+          <div>
+            <span className="lbl">Product</span>
+            <select className="select" value={reqProduct} onChange={(e) => setReqProduct(Number(e.target.value))}>
+              <option value={0}>-- Choose Product --</option>
+              {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
+            </select>
+          </div>
+          <div>
+            <span className="lbl">Quantity (codes)</span>
+            <input type="number" min={1} max={50} className="input" value={reqQty} onChange={(e) => setReqQty(Math.max(1, Number(e.target.value) || 1))} />
+          </div>
+          <div className="flex items-end">
+            <button type="submit" disabled={busy || !reqProduct} className="btn w-full !bg-cyan-700 font-bold text-white hover:!bg-cyan-600 disabled:opacity-40 sm:w-auto">
+              Request Codes
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {data.codeRequests.length > 0 && (
+        <div className="card">
+          <h3 className="text-[15px] font-bold text-cyan-300">My Product Code Requests</h3>
+          <div className="tbl-wrap mt-2">
+            <table className="tbl">
+              <thead><tr><th>Date Requested</th><th>Request</th><th>Status</th></tr></thead>
+              <tbody>
+                {data.codeRequests.map((o) => (
+                  <tr key={o.id}>
+                    <td className="text-zinc-500">{dt(o.created_at)}</td>
+                    <td className="!whitespace-normal">{String(o.order_details || '').replace(/^CODE REQUEST:\s*/i, '')}</td>
+                    <td>
+                      {o.status === 'pending' && <span className="font-semibold text-amber-300">⏳ Pending Admin Review</span>}
+                      {o.status === 'approved' && <span className="font-semibold text-emerald-400">✓ Approved — codes in My Products</span>}
+                      {o.status === 'rejected' && <span className="font-semibold text-red-400">✕ Rejected</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <h3 className="text-[15px] font-bold text-cyan-300">Product Commission History (latest 100)</h3>
