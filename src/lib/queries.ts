@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { exec, one, q, scalar } from './db';
 import { phFormat, phMonthKey } from './time';
-import { ensureSettings, setting, settingInt, settingNum } from '../lib/settings';
+import { ensureSettings, setting, settingBool, settingInt, settingNum, unilevelMatrix } from '../lib/settings';
 import type { AccountRow, LedgerRow, OrderRow, PackageRow, PinRow, UserRow } from './types';
 import {
   accountById,
@@ -127,6 +127,8 @@ export interface MemberPortalData {
   gateComplete: boolean;
   maintenance: boolean;
   starterBenefits: { dr: number; productCommPerBottle: number };
+  unilevelDetail: { rates: number[]; levelTotals: { level: number; count: number; total: number }[]; rows: LedgerRow[] };
+  productCommDetail: { perBottle: number; bottles: number; rows: LedgerRow[] };
 }
 
 /** Resolve the logged-in member's MA + CA nodes and the active node. */
@@ -228,6 +230,28 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
         )
     : [];
 
+  const unilevelRows = await q<LedgerRow>(
+    `SELECT * FROM ledger WHERE user_id=$1 AND note LIKE 'Unilevel Comm%' ORDER BY id DESC LIMIT 100`,
+    [userId],
+  );
+  const unilevelLevelRows = await q<{ lvl: number; cnt: number; total: string }>(
+    `SELECT COALESCE((regexp_match(note, 'Compressed Level ([0-9]+)'))[1]::int, 0) AS lvl,
+            COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0)::text AS total
+       FROM ledger WHERE user_id=$1 AND note LIKE 'Unilevel Comm%' GROUP BY 1 ORDER BY 1`,
+    [userId],
+  );
+  const productCommRows = await q<LedgerRow>(
+    `SELECT * FROM ledger WHERE user_id=$1 AND note LIKE 'Product Comm%' ORDER BY id DESC LIMIT 100`,
+    [userId],
+  );
+  const productCommBottles = Number(
+    (await scalar<string>(
+      `SELECT COALESCE(SUM((regexp_match(note, 'Qty: ([0-9]+)'))[1]::int), 0)
+         FROM ledger WHERE user_id=$1 AND note LIKE 'Product Comm%'`,
+      [userId],
+    )) ?? 0,
+  );
+
   const ledger = await q<LedgerRow>(
     `SELECT * FROM ledger WHERE user_id=$1
        AND ((amount > 0 AND type='cash' AND status<>'hang') OR type='gc' OR (type='hang' AND status='hang')
@@ -305,6 +329,16 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
     adminActivatedProducts,
     gateComplete: ma ? await firstRowsComplete(Number(ma.id)) : false,
     maintenance: setting('mlm_maintenance_mode') === '1',
+    unilevelDetail: {
+      rates: unilevelMatrix(),
+      levelTotals: unilevelLevelRows.map((r) => ({ level: Number(r.lvl), count: Number(r.cnt), total: num(r.total) })),
+      rows: unilevelRows,
+    },
+    productCommDetail: {
+      perBottle: settingNum('mlm_sys_product_comm_starter', 20),
+      bottles: productCommBottles,
+      rows: productCommRows,
+    },
     starterBenefits: {
       dr: settingNum('mlm_sys_dr_starter', 50),
       productCommPerBottle: settingNum('mlm_sys_product_comm_starter', 20),
@@ -1109,3 +1143,121 @@ export async function downlineEarningsTable(ownerAccountId: number) {
 }
 
 export { resyncWallet };
+
+/* ------------------------- unilevel / product-comm reports (admin) ------------------------- */
+
+export interface UnilevelReportRow {
+  user_id: number;
+  username: string;
+  rank: string;
+  lp: number;
+  eligible: boolean;
+  released: number;
+  pending: number;
+}
+
+export interface UnilevelReport {
+  released: number;
+  pending: number;
+  earners: number;
+  cutoffHold: boolean;
+  monthlyReset: boolean;
+  rates: number[];
+  rows: UnilevelReportRow[];
+  recent: (LedgerRow & { username: string })[];
+}
+
+export async function unilevelReport(): Promise<UnilevelReport> {
+  const agg = await q<{ user_id: number; released: string; pending: string }>(
+    `SELECT user_id,
+            COALESCE(SUM(CASE WHEN status<>'hang' THEN amount ELSE 0 END), 0)::text AS released,
+            COALESCE(SUM(CASE WHEN status='hang' THEN amount ELSE 0 END), 0)::text AS pending
+       FROM ledger WHERE note LIKE 'Unilevel Comm%' GROUP BY user_id`,
+  );
+  const rows: UnilevelReportRow[] = [];
+  for (const a of agg) {
+    const u = await userById(Number(a.user_id));
+    const lp = await getUnilevelLp(Number(a.user_id));
+    rows.push({
+      user_id: Number(a.user_id),
+      username: u?.username ?? `#${a.user_id}`,
+      rank: u?.rank ?? '',
+      lp,
+      eligible: lp >= 5,
+      released: num(a.released),
+      pending: num(a.pending),
+    });
+  }
+  rows.sort((x, y) => y.released + y.pending - (x.released + x.pending));
+  const recent = await q<LedgerRow & { username: string }>(
+    `SELECT l.*, COALESCE(u.username, '') AS username
+       FROM ledger l LEFT JOIN users u ON u.id = l.user_id
+      WHERE l.note LIKE 'Unilevel Comm%' ORDER BY l.id DESC LIMIT 50`,
+  );
+  return {
+    released: rows.reduce((s, r) => s + r.released, 0),
+    pending: rows.reduce((s, r) => s + r.pending, 0),
+    earners: rows.length,
+    cutoffHold: settingBool('mlm_sys_unilevel_cutoff_hold', true),
+    monthlyReset: unilevelMonthlyResetOn(),
+    rates: unilevelMatrix(),
+    rows: rows.slice(0, 100),
+    recent,
+  };
+}
+
+export interface ProductCommReportRow {
+  user_id: number;
+  username: string;
+  rank: string;
+  bottles: number;
+  released: number;
+  pending: number;
+}
+
+export interface ProductCommReport {
+  released: number;
+  pending: number;
+  bottles: number;
+  earners: number;
+  perBottle: number;
+  rows: ProductCommReportRow[];
+  recent: (LedgerRow & { username: string })[];
+}
+
+export async function productCommReport(): Promise<ProductCommReport> {
+  const agg = await q<{ user_id: number; bottles: number; released: string; pending: string }>(
+    `SELECT user_id,
+            COALESCE(SUM((regexp_match(note, 'Qty: ([0-9]+)'))[1]::int), 0)::int AS bottles,
+            COALESCE(SUM(CASE WHEN status<>'hang' THEN amount ELSE 0 END), 0)::text AS released,
+            COALESCE(SUM(CASE WHEN status='hang' THEN amount ELSE 0 END), 0)::text AS pending
+       FROM ledger WHERE note LIKE 'Product Comm%' GROUP BY user_id`,
+  );
+  const rows: ProductCommReportRow[] = [];
+  for (const a of agg) {
+    const u = await userById(Number(a.user_id));
+    rows.push({
+      user_id: Number(a.user_id),
+      username: u?.username ?? `#${a.user_id}`,
+      rank: u?.rank ?? '',
+      bottles: Number(a.bottles),
+      released: num(a.released),
+      pending: num(a.pending),
+    });
+  }
+  rows.sort((x, y) => y.released + y.pending - (x.released + x.pending));
+  const recent = await q<LedgerRow & { username: string }>(
+    `SELECT l.*, COALESCE(u.username, '') AS username
+       FROM ledger l LEFT JOIN users u ON u.id = l.user_id
+      WHERE l.note LIKE 'Product Comm%' ORDER BY l.id DESC LIMIT 50`,
+  );
+  return {
+    released: rows.reduce((s, r) => s + r.released, 0),
+    pending: rows.reduce((s, r) => s + r.pending, 0),
+    bottles: rows.reduce((s, r) => s + r.bottles, 0),
+    earners: rows.length,
+    perBottle: settingNum('mlm_sys_product_comm_starter', 20),
+    rows: rows.slice(0, 100),
+    recent,
+  };
+}

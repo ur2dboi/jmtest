@@ -5,6 +5,8 @@ import { phFormat } from '@/lib/time';
 import {
   adminOverview,
   encashReport,
+  productCommReport,
+  unilevelReport,
   leaderboards,
   orderIsProduct,
   packagesByName,
@@ -147,6 +149,8 @@ export default async function AdminDashboardPage({
   const encashEnd = sp.encash_end || monthEnd;
   const sales = await salesReport(salesStart, salesEnd);
   const encashRep = await encashReport(encashStart, encashEnd);
+  const uniReport = await unilevelReport();
+  const prodCommReport = await productCommReport();
 
   // Genealogy viewer
   const adminUser = await userById(1);
@@ -203,6 +207,8 @@ export default async function AdminDashboardPage({
       pendingEncash={serial(pendingEncash.rows)}
       sales={serial(sales)}
       encashReportData={serial(encashRep)}
+      unilevelReport={serial(uniReport)}
+      productCommReport={serial(prodCommReport)}
       salesStart={salesStart}
       salesEnd={salesEnd}
       encashStart={encashStart}

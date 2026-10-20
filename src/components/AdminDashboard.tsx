@@ -4,7 +4,7 @@ import React from 'react';
 import { api, Badge, confirmDialog, cx, Empty, Modal, peso, rankBadge, reloadSoon, Stat, Toast, useToast } from './ui';
 import TreeView, { type SlotInfo } from './TreeView';
 import { phFormat } from '@/lib/time';
-import type { AdminAlert, AlertHistoryRow, AdminOverview } from '@/lib/queries';
+import type { AdminAlert, AlertHistoryRow, AdminOverview, ProductCommReport, UnilevelReport } from '@/lib/queries';
 import type { AuditRow, OrderRow, PackageRow, PinRow, UserRow } from '@/lib/types';
 import type { TreeCell } from '@/lib/engine/tree';
 import type { EncashRow } from '@/lib/engine/encash';
@@ -38,6 +38,8 @@ export interface AdminProps {
   pendingEncash: EncashRow[];
   sales: { rows: (OrderRow & { username: string; item: string; code: string; amount: number })[]; total: number };
   encashReportData: { rows: (Record<string, unknown> & { username: string; gross: number; fees: number; net: number; note: string })[]; totalNet: number };
+  unilevelReport: UnilevelReport;
+  productCommReport: ProductCommReport;
   salesStart: string; salesEnd: string; encashStart: string; encashEnd: string;
   treeTarget: string;
   treeRoot: TreeCell | null;
@@ -74,6 +76,8 @@ const TABS: { id: string; label: string; icon: string; badge?: (p: AdminProps) =
   { id: 'tab-sales-report', label: 'Sales Report', icon: '📈' },
   { id: 'tab-encashment-report', label: 'Encashment Report', icon: '🧾' },
   { id: 'tab-payables-report', label: 'Payables Report', icon: '💵' },
+  { id: 'tab-unilevel', label: 'Unilevel', icon: '📶' },
+  { id: 'tab-prodcomm', label: 'Product Commission', icon: '🧴' },
   { id: 'tab-tree', label: 'Genealogy Viewer', icon: '🌳' },
   { id: 'tab-logs', label: 'Activity Logs', icon: '📜' },
   { id: 'tab-settings', label: 'Comp. Plan', icon: '⚙️' },
@@ -168,6 +172,8 @@ export default function AdminDashboard(props: AdminProps) {
         {tab === 'tab-sales-report' && <SalesTab {...props} go={go} />}
         {tab === 'tab-encashment-report' && <EncashReportTab {...props} go={go} />}
         {tab === 'tab-payables-report' && <PayablesTab overview={props.overview} />}
+        {tab === 'tab-unilevel' && <UnilevelAdminTab report={props.unilevelReport} />}
+        {tab === 'tab-prodcomm' && <ProductCommAdminTab report={props.productCommReport} />}
         {tab === 'tab-tree' && <TreeTabAdmin {...props} />}
         {tab === 'tab-logs' && <LogsTab {...props} post={post} busy={busy} />}
         {tab === 'tab-settings' && <SettingsTab {...props} post={post} busy={busy} />}
@@ -1152,6 +1158,147 @@ function LogsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ UNILEVEL (ADMIN) ============================ */
+function UnilevelAdminTab({ report }: { report: UnilevelReport }) {
+  const r = report;
+  return (
+    <div className="animate-fadeIn space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Unilevel Released (All-Time)" value={peso(r.released)} />
+        <Stat label="Pending Cutoff (Held)" value={<span className="text-amber-300">{peso(r.pending)}</span>} sub="Released at monthly cutoff" />
+        <Stat label="Members Earning Unilevel" value={String(r.earners)} />
+        <Stat label="Crediting Mode" value={r.cutoffHold ? 'Monthly Cutoff' : 'Instant'} sub={r.monthlyReset ? 'LP resets monthly (5 LP to qualify)' : 'Lifetime LP (5 LP to qualify)'} />
+      </div>
+
+      <div className="card">
+        <h3 className="text-[16px] font-bold text-gold">📶 Unilevel Commission Matrix (₱ per bottle)</h3>
+        <p className="mt-1 text-[12px] text-zinc-500">Dynamic compression: Starter / under-maintained / CA-connector uplines are skipped without consuming a paid tier. Edit the rates in Comp. Plan settings (Unilevel Levels 1–10).</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {r.rates.map((rate, i) => (
+            <div key={i} className="rounded-lg border border-line bg-[#0a0a0a] px-3 py-2 text-center">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Level {i + 1}</div>
+              <div className="text-[15px] font-extrabold text-zinc-100">{peso(rate)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 className="text-[15px] font-bold text-emerald-400">Per-Member Unilevel Earnings</h3>
+        <div className="tbl-wrap mt-2">
+          <table className="tbl">
+            <thead><tr><th>Member</th><th>Rank</th><th>LP</th><th>Eligible (≥5 LP)</th><th>Released</th><th>Pending Cutoff</th><th>Total</th></tr></thead>
+            <tbody>
+              {r.rows.length === 0 && <tr><td colSpan={7} className="text-center text-zinc-500">No Unilevel earnings recorded yet.</td></tr>}
+              {r.rows.map((m) => (
+                <tr key={m.user_id}>
+                  <td className="font-semibold text-zinc-100">@{m.username}</td>
+                  <td>{m.rank}</td>
+                  <td>{m.lp} LP</td>
+                  <td>{m.eligible ? <span className="text-emerald-400">Yes ✓</span> : <span className="text-amber-300">No</span>}</td>
+                  <td>{peso(m.released)}</td>
+                  <td className="text-amber-300">{peso(m.pending)}</td>
+                  <td className="font-bold text-zinc-100">{peso(m.released + m.pending)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 className="text-[15px] font-bold text-emerald-400">Recent Unilevel Entries</h3>
+        <div className="tbl-wrap mt-2">
+          <table className="tbl">
+            <thead><tr><th>Date &amp; Time</th><th>Member</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
+            <tbody>
+              {r.recent.length === 0 && <tr><td colSpan={5} className="text-center text-zinc-500">No entries yet.</td></tr>}
+              {r.recent.map((l) => (
+                <tr key={l.id}>
+                  <td className="text-zinc-500">{dt(l.created_at)}</td>
+                  <td>@{l.username}</td>
+                  <td className="!whitespace-normal">{l.note}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ PRODUCT COMMISSION (ADMIN) ============================ */
+function ProductCommAdminTab({ report }: { report: ProductCommReport }) {
+  const r = report;
+  return (
+    <div className="animate-fadeIn space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Product Comm Released (All-Time)" value={peso(r.released)} />
+        <Stat label="Pending Cutoff (Held)" value={<span className="text-amber-300">{peso(r.pending)}</span>} sub="Released monthly with Unilevel" />
+        <Stat label="Starter Bottles Credited" value={String(r.bottles)} sub={`At ${peso(r.perBottle)} per bottle`} />
+        <Stat label="Members Earning" value={String(r.earners)} />
+      </div>
+
+      <div className="card" style={{ borderColor: '#0e7490' }}>
+        <h3 className="text-[16px] font-bold text-cyan-300">🧴 Product Commission Rule</h3>
+        <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">
+          Paid only to the <strong className="text-zinc-300">direct sponsor</strong> of a Starter member, on that Starter&apos;s repeat product
+          activations (Product Codes from Product Orders — separate from package codes). The sponsor must be
+          <strong className="text-zinc-300"> Premium or StarPremium</strong> with at least <strong className="text-zinc-300">5 LP maintenance</strong>.
+          Earnings are held as Pending Cutoff and released monthly together with Unilevel. Rate is editable in
+          Comp. Plan settings (Starter Repeat-Order Product Comm).
+        </p>
+      </div>
+
+      <div className="card">
+        <h3 className="text-[15px] font-bold text-cyan-300">Per-Member Product Commission</h3>
+        <div className="tbl-wrap mt-2">
+          <table className="tbl">
+            <thead><tr><th>Member (Sponsor)</th><th>Rank</th><th>Bottles Credited</th><th>Released</th><th>Pending Cutoff</th><th>Total</th></tr></thead>
+            <tbody>
+              {r.rows.length === 0 && <tr><td colSpan={6} className="text-center text-zinc-500">No Product Commission recorded yet.</td></tr>}
+              {r.rows.map((m) => (
+                <tr key={m.user_id}>
+                  <td className="font-semibold text-zinc-100">@{m.username}</td>
+                  <td>{m.rank}</td>
+                  <td>{m.bottles}</td>
+                  <td>{peso(m.released)}</td>
+                  <td className="text-amber-300">{peso(m.pending)}</td>
+                  <td className="font-bold text-zinc-100">{peso(m.released + m.pending)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 className="text-[15px] font-bold text-cyan-300">Recent Product Commission Entries</h3>
+        <div className="tbl-wrap mt-2">
+          <table className="tbl">
+            <thead><tr><th>Date &amp; Time</th><th>Member (Sponsor)</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
+            <tbody>
+              {r.recent.length === 0 && <tr><td colSpan={5} className="text-center text-zinc-500">No entries yet.</td></tr>}
+              {r.recent.map((l) => (
+                <tr key={l.id}>
+                  <td className="text-zinc-500">{dt(l.created_at)}</td>
+                  <td>@{l.username}</td>
+                  <td className="!whitespace-normal">{l.note}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

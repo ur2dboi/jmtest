@@ -42,6 +42,8 @@ const TABS: { id: string; label: string; icon: string; hideForChild?: boolean }[
   { id: 'mtab-overview', label: 'Dashboard', icon: '📊' },
   { id: 'mtab-transactions', label: 'Transactions', icon: '📃' },
   { id: 'mtab-reports', label: 'Income Reports', icon: '📈' },
+  { id: 'mtab-unilevel', label: 'Unilevel', icon: '📶', hideForChild: true },
+  { id: 'mtab-prodcomm', label: 'Product Commission', icon: '🧴', hideForChild: true },
   { id: 'mtab-tree', label: 'Genealogy', icon: '🌳' },
   { id: 'mtab-encash', label: 'Encashment', icon: '💸' },
   { id: 'mtab-pkg-orders', label: 'Package Orders', icon: '📦' },
@@ -176,6 +178,8 @@ export default function MemberPortal(props: MemberPortalProps) {
         )}
         {tab === 'mtab-transactions' && <TransactionsTab data={data} />}
         {tab === 'mtab-reports' && <ReportsTab data={data} />}
+        {tab === 'mtab-unilevel' && !isChild && <UnilevelTab data={data} />}
+        {tab === 'mtab-prodcomm' && !isChild && <ProductCommTab data={data} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-pkg-orders' && <PkgOrdersTab {...props} post={post} busy={busy} setTab={setTab} />}
@@ -218,8 +222,8 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
           <SummaryRow label="Direct Referral Bonus" value={peso(earn.dr)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="A+B Pairing Bonus" value={peso(earn.pairingReleased)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Tri-Leg Bonus" value={peso(earn.tri)} onClick={() => setTab('mtab-reports')} />
-          <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab('mtab-reports')} />
-          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab('mtab-reports')} />
+          <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
+          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-prodcomm')} />
           {earn.productCommPending > 0 && (
             <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
               <span>⏳ Product Comm Pending Cutoff</span><strong>{peso(earn.productCommPending)}</strong>
@@ -353,8 +357,8 @@ function StarterBenefitsCard({ data, setTab }: { data: MemberPortalData; setTab:
                   ⚠️ Product Commission is credited only once you meet the 5 LP maintenance requirement.
                 </p>
               )}
-              <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab('mtab-reports')}>
-                View in Income Reports →
+              <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-prodcomm')}>
+                View Product Commission tab →
               </button>
             </div>
           ) : isStarter ? (
@@ -537,6 +541,152 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
         <strong className="text-emerald-400">
           {filter === 'GC' ? `${gcCount} GC` : `${peso(cashTotal)}${gcCount ? ` (+ ${gcCount} GC)` : ''}${flushCount ? ` / ${flushCount} flushed` : ''}`}
         </strong>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ UNILEVEL ============================ */
+function UnilevelTab({ data }: { data: MemberPortalData }) {
+  const earn = data.earnings;
+  const d = data.unilevelDetail;
+  const lpNeeded = Math.max(0, 5 - data.lp);
+  return (
+    <div className="animate-fadeIn space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Unilevel Released" value={peso(earn.unilevel)} accent sub="Credited to wallet" />
+        <Stat label="Pending Cutoff" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} sub="Released monthly at cutoff" />
+        <Stat label="My LP (Maintenance)" value={`${data.lp} LP`} sub={data.lpEligible ? 'Eligible ✓ (≥ 5 LP)' : `Need ${lpNeeded} more LP to qualify`} />
+        <Stat label="Compression" value="Dynamic" sub="Ineligible/Starter uplines are skipped, not charged a tier" />
+      </div>
+
+      <div className="card">
+        <h3 className="text-[16px] font-bold text-gold">📶 Unilevel Commission Matrix (₱ per bottle)</h3>
+        <p className="mt-1 text-[12px] text-zinc-500">
+          Paid on product activations in your network across up to 10 compressed levels. Only members with at least
+          5 LP maintenance qualify; Starter and under-maintained uplines are compressed out without consuming a tier.
+          With Cutoff Hold ON, earnings show immediately but become withdrawable after the monthly cutoff.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+          {d.rates.map((r, i) => (
+            <div key={i} className="rounded-lg border border-line bg-[#0a0a0a] px-3 py-2 text-center">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Level {i + 1}</div>
+              <div className="text-[15px] font-extrabold text-zinc-100">{peso(r)}</div>
+            </div>
+          ))}
+        </div>
+        {!data.lpEligible && (
+          <p className="mt-3 text-[12px] text-amber-300">
+            ⚠️ You have {data.lp} LP — activate {lpNeeded} more LP worth of products this period to qualify for Unilevel commissions.
+          </p>
+        )}
+      </div>
+
+      {d.levelTotals.length > 0 && (
+        <div className="card">
+          <h3 className="text-[15px] font-bold text-emerald-400">Earnings by Compressed Level</h3>
+          <div className="tbl-wrap mt-2">
+            <table className="tbl">
+              <thead><tr><th>Compressed Level</th><th>Entries</th><th>Total Earned</th></tr></thead>
+              <tbody>
+                {d.levelTotals.map((l) => (
+                  <tr key={l.level}>
+                    <td>Level {l.level}</td>
+                    <td>{l.count}</td>
+                    <td className="font-bold text-emerald-400">{peso(l.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <h3 className="text-[15px] font-bold text-emerald-400">Unilevel History (latest 100)</h3>
+        <div className="tbl-wrap mt-2">
+          <table className="tbl">
+            <thead><tr><th>Date &amp; Time</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
+            <tbody>
+              {d.rows.length === 0 && (
+                <tr><td colSpan={4} className="text-center text-zinc-500">No Unilevel earnings yet. Activate products and grow your network — commissions from your downlines&apos; product activations appear here.</td></tr>
+              )}
+              {d.rows.map((l) => (
+                <tr key={l.id}>
+                  <td className="text-zinc-500">{dt(l.created_at)}</td>
+                  <td className="!whitespace-normal">{l.note}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ PRODUCT COMMISSION ============================ */
+function ProductCommTab({ data }: { data: MemberPortalData }) {
+  const earn = data.earnings;
+  const d = data.productCommDetail;
+  const rankNorm = (data.user.rank || '').replace(/\s+/g, '').toLowerCase();
+  const isStarter = rankNorm.includes('starter');
+  const isPremiumTier = !isStarter && rankNorm.includes('premium');
+  const lpNeeded = Math.max(0, 5 - data.lp);
+  return (
+    <div className="animate-fadeIn space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
+        <Stat label="Pending Cutoff" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} sub="Released monthly with Unilevel" />
+        <Stat label="Starter Bottles Credited" value={String(d.bottles)} sub="From direct Starter repeat orders" />
+        <Stat label="Rate per Bottle" value={peso(d.perBottle)} sub="Direct sponsor only" />
+      </div>
+
+      <div className="card" style={{ borderColor: '#0e7490' }}>
+        <h3 className="text-[16px] font-bold text-cyan-300">🧴 How Product Commission Works</h3>
+        <div className="mt-2 space-y-1 text-[13px] leading-relaxed text-zinc-400">
+          <p>1. Your <strong className="text-zinc-200">direct Starter</strong> member re-orders products and activates a <strong className="text-zinc-200">Product Code</strong> (issued from Product Orders — separate from package codes).</p>
+          <p>2. You earn <strong className="text-zinc-200">{peso(d.perBottle)} per bottle</strong> if you are <strong className="text-zinc-200">Premium or StarPremium</strong> AND have met the <strong className="text-zinc-200">5 LP maintenance</strong>.</p>
+          <p>3. Earnings are <strong className="text-zinc-200">held as Pending Cutoff</strong> and released monthly together with Unilevel.</p>
+        </div>
+        {isPremiumTier ? (
+          <p className="mt-3 text-[13px]">
+            Your status: <strong className="text-zinc-100">{data.user.rank}</strong> · {data.lp} LP —{' '}
+            {data.lpEligible
+              ? <strong className="text-emerald-400">Eligible ✓ You earn on your direct Starters&apos; repeat orders.</strong>
+              : <strong className="text-amber-300">Need {lpNeeded} more LP to start earning.</strong>}
+          </p>
+        ) : isStarter ? (
+          <p className="mt-3 text-[13px] text-zinc-400">
+            You are a <strong className="text-zinc-200">Starter</strong>: your own repeat orders earn this commission for your direct
+            Premium/StarPremium sponsor. <strong className="text-zinc-200">Upgrade to Premium or StarPremium</strong> (Profile → Upgrade Account)
+            to earn Product Commission on your direct Starters&apos; repeat orders.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="card">
+        <h3 className="text-[15px] font-bold text-cyan-300">Product Commission History (latest 100)</h3>
+        <div className="tbl-wrap mt-2">
+          <table className="tbl">
+            <thead><tr><th>Date &amp; Time</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
+            <tbody>
+              {d.rows.length === 0 && (
+                <tr><td colSpan={4} className="text-center text-zinc-500">No Product Commission yet. Once a direct Starter under you activates repeat-order products (and you meet 5 LP), each bottle appears here at {peso(d.perBottle)}.</td></tr>
+              )}
+              {d.rows.map((l) => (
+                <tr key={l.id}>
+                  <td className="text-zinc-500">{dt(l.created_at)}</td>
+                  <td className="!whitespace-normal">{l.note}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">⏳ Pending Cutoff</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
