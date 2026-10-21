@@ -443,7 +443,7 @@ function TransactionsTab({ data }: { data: MemberPortalData }) {
 }
 
 /* ============================ REPORTS ============================ */
-const REPORT_FILTERS = ['All', 'Direct Referral', 'Pairing', 'Trifinity Pair', 'Unilevel', 'Product Commission', 'GC', 'Flush'] as const;
+const REPORT_FILTERS = ['All', 'Direct Referral', 'Pairing', 'Trifinity Pair', 'Unilevel', 'Product Commission', 'FLOATING Commission (LP)', 'GC', 'Flush'] as const;
 const FILTER_TERMS: Record<string, string[]> = {
   Pairing: ['a+b', 'pairing bonus'],
   'Trifinity Pair': ['tri-leg'],
@@ -459,6 +459,10 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
   const rows = data.ledger;
   const matched = rows.filter((l) => {
     if (filter === 'All') return true;
+    if (filter === 'FLOATING Commission (LP)') {
+      const desc = (l.note || '').toLowerCase();
+      return l.status === 'hang' && (desc.includes('unilevel comm') || desc.includes('product comm'));
+    }
     const desc = (l.note || '').toLowerCase();
     return FILTER_TERMS[filter].some((t) => desc.includes(t));
   });
@@ -467,7 +471,9 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
     const isFlush = /flush out/i.test(l.note);
     if (isFlush) flushCount++;
     else if (l.type === 'gc') gcCount += Number(l.amount);
-    else cashTotal += Number(l.amount);
+    // FLOATING (hang) and forfeited rows list in the reports but never count
+    // toward income totals; the FLOATING report totals the held amount itself.
+    else if (filter === 'FLOATING Commission (LP)' ? l.status === 'hang' : l.status !== 'hang' && l.status !== 'forfeited') cashTotal += Number(l.amount);
   }
   return (
     <div className="card animate-fadeIn">
@@ -475,7 +481,7 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
         <h3 className="text-[16px] font-bold text-gold">📈 Income Report: {filter}</h3>
         <select className="select !w-auto" value={filter} onChange={(e) => setFilter(e.target.value as never)}>
           {REPORT_FILTERS.map((f) => (
-            <option key={f} value={f}>{f === 'All' ? 'All Earnings' : f === 'Pairing' ? 'A+B Pairing Bonus' : f === 'Trifinity Pair' ? 'Trifinity Pair' : f === 'Unilevel' ? 'Unilevel Comm' : f === 'Product Commission' ? 'Product Commission' : f === 'GC' ? 'Available GC' : f === 'Flush' ? 'Daily Limit' : 'Direct Referral Bonus'}</option>
+            <option key={f} value={f}>{f === 'All' ? 'All Earnings' : f === 'Pairing' ? 'A+B Pairing Bonus' : f === 'Trifinity Pair' ? 'Trifinity Pair' : f === 'Unilevel' ? 'Unilevel Comm' : f === 'Product Commission' ? 'Product Commission' : f === 'FLOATING Commission (LP)' ? 'FLOATING Commission (LP)' : f === 'GC' ? 'Available GC' : f === 'Flush' ? 'Daily Limit' : 'Direct Referral Bonus'}</option>
           ))}
         </select>
       </div>
@@ -491,7 +497,7 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
                   <td className="!whitespace-normal">{l.note}</td>
                   <td style={{ color: isFlush ? '#ef4444' : '#10b981', fontWeight: 700 }}>
-                    {isFlush ? 'FLUSHED / LIMIT EXCEEDED' : l.type === 'gc' ? `${Math.trunc(Number(l.amount))} GC` : `+${peso(l.amount)}`}
+                    {isFlush ? 'FLUSHED / LIMIT EXCEEDED' : l.status === 'forfeited' ? 'FORFEITED / NO MAINTENANCE' : l.type === 'gc' ? `${Math.trunc(Number(l.amount))} GC` : `+${peso(l.amount)}`}
                   </td>
                 </tr>
               );
@@ -681,7 +687,7 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
                     ? <span className="font-semibold text-emerald-400">Unilevel</span>
                     : <span className="font-semibold text-cyan-300">Product Comm</span>}</td>
                   <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : l.status === 'forfeited' ? <span className="font-semibold text-red-400">Forfeited</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
                 </tr>
               ))}

@@ -59,9 +59,9 @@ export async function earningsFor(userId: number): Promise<EarningsBreakdown> {
        COALESCE(SUM(CASE WHEN note LIKE '%A+B%' AND type='cash' AND status='released' THEN amount ELSE 0 END),0)::text AS pairing_released,
        COALESCE(SUM(CASE WHEN note LIKE '%A+B%' AND type='cash' AND status='hang' THEN amount ELSE 0 END),0)::text AS pairing_hang,
        COALESCE(SUM(CASE WHEN note LIKE '%Tri-Leg%' AND type='cash' THEN amount ELSE 0 END),0)::text AS tri,
-       COALESCE(SUM(CASE WHEN note LIKE '%Unilevel%' AND note NOT LIKE '%Product Comm%' AND status<>'hang' THEN amount ELSE 0 END),0)::text AS unilevel,
+       COALESCE(SUM(CASE WHEN note LIKE '%Unilevel%' AND note NOT LIKE '%Product Comm%' AND status NOT IN ('hang','forfeited') THEN amount ELSE 0 END),0)::text AS unilevel,
        COALESCE(SUM(CASE WHEN note LIKE '%Unilevel%' AND note NOT LIKE '%Product Comm%' AND status='hang' THEN amount ELSE 0 END),0)::text AS unilevel_pending,
-       COALESCE(SUM(CASE WHEN note LIKE '%Product Comm%' AND status<>'hang' THEN amount ELSE 0 END),0)::text AS product_comm,
+       COALESCE(SUM(CASE WHEN note LIKE '%Product Comm%' AND status NOT IN ('hang','forfeited') THEN amount ELSE 0 END),0)::text AS product_comm,
        COALESCE(SUM(CASE WHEN note LIKE '%Product Comm%' AND status='hang' THEN amount ELSE 0 END),0)::text AS product_comm_pending,
        COALESCE(SUM(CASE WHEN type='gc' THEN amount ELSE 0 END),0)::text AS gc,
        COALESCE(SUM(CASE WHEN note LIKE '%Encashment%' AND note LIKE '%Pending%' AND note NOT LIKE '%REJECTED%' AND note NOT LIKE '%APPROVED%' THEN ABS(amount) ELSE 0 END),0)::text AS pending_encash,
@@ -190,8 +190,8 @@ export async function resolveMemberAccounts(
 export async function memberPortalData(userId: number, activeNode: string): Promise<MemberPortalData | null> {
   // Monthly settlement (1st of the month): matured Floating (LP)
   // commissions move into wallet/earnings. Idempotent; no-op mid-month.
-  await releaseMaturedUnilevelCommissions();
   await ensureSettings();
+  await releaseMaturedUnilevelCommissions();
   const user = await userById(Number(userId));
   if (!user) return null;
   const { ma, cas, active, isChildLogin } = await resolveMemberAccounts(userId, activeNode);
@@ -243,7 +243,7 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
   const unilevelLevelRows = await q<{ lvl: number; cnt: number; total: string }>(
     `SELECT COALESCE((regexp_match(note, 'Compressed Level ([0-9]+)'))[1]::int, 0) AS lvl,
             COUNT(*)::int AS cnt, COALESCE(SUM(amount), 0)::text AS total
-       FROM ledger WHERE user_id=$1 AND note LIKE 'Unilevel Comm%' GROUP BY 1 ORDER BY 1`,
+       FROM ledger WHERE user_id=$1 AND note LIKE 'Unilevel Comm%' AND status <> 'forfeited' GROUP BY 1 ORDER BY 1`,
     [userId],
   );
   const productCommRows = await q<LedgerRow>(
@@ -476,7 +476,7 @@ export async function adminOverview(): Promise<AdminOverview> {
   let payFloating = 0;
   const ledgerUsers = await q<{ user_id: number; earned: string; deducted: string }>(
     `SELECT user_id,
-            COALESCE(SUM(CASE WHEN amount>0 AND type='cash' AND status<>'hang' AND note NOT LIKE '%Encashment%' THEN amount ELSE 0 END),0)::text AS earned,
+            COALESCE(SUM(CASE WHEN amount>0 AND type='cash' AND status NOT IN ('hang','forfeited') AND note NOT LIKE '%Encashment%' THEN amount ELSE 0 END),0)::text AS earned,
             COALESCE(SUM(CASE WHEN amount<0 THEN ABS(amount) ELSE 0 END),0)::text AS deducted
      FROM ledger GROUP BY user_id`,
   );
@@ -528,7 +528,7 @@ export async function adminOverview(): Promise<AdminOverview> {
 export async function leaderboards(start: string, end: string) {
   const earners = await q<{ user_id: number; total: string }>(
     `SELECT user_id,
-            (COALESCE(SUM(CASE WHEN amount>0 AND type='cash' AND status<>'hang' AND note NOT LIKE '%Refund%' THEN amount ELSE 0 END),0)
+            (COALESCE(SUM(CASE WHEN amount>0 AND type='cash' AND status NOT IN ('hang','forfeited') AND note NOT LIKE '%Refund%' THEN amount ELSE 0 END),0)
              + COALESCE(SUM(CASE WHEN type='hang' AND status='hang' THEN amount ELSE 0 END),0))::text AS total
      FROM ledger WHERE created_at::date >= $1::date AND created_at::date <= $2::date
      GROUP BY user_id ORDER BY total DESC LIMIT 10`,
@@ -646,7 +646,7 @@ export async function detectEarningAlerts(): Promise<AdminAlert[]> {
   const walletRows = await q<{ username: string; wallet: string; earned: string; withdrawn: string }>(
     `SELECT u.username,
             COALESCE(u.wallet_balance,0)::text AS wallet,
-            COALESCE(SUM(CASE WHEN l.amount>0 AND l.type='cash' AND l.status<>'hang' AND l.note NOT LIKE '%Encashment%' THEN l.amount ELSE 0 END),0)::text AS earned,
+            COALESCE(SUM(CASE WHEN l.amount>0 AND l.type='cash' AND l.status NOT IN ('hang','forfeited') AND l.note NOT LIKE '%Encashment%' THEN l.amount ELSE 0 END),0)::text AS earned,
             COALESCE(SUM(CASE WHEN l.amount<0 THEN ABS(l.amount) ELSE 0 END),0)::text AS withdrawn
      FROM ledger l JOIN users u ON u.id = l.user_id
      GROUP BY u.id, u.username, u.wallet_balance`,
@@ -1187,7 +1187,7 @@ export interface UnilevelReport {
 export async function unilevelReport(): Promise<UnilevelReport> {
   const agg = await q<{ user_id: number; released: string; pending: string }>(
     `SELECT user_id,
-            COALESCE(SUM(CASE WHEN status<>'hang' THEN amount ELSE 0 END), 0)::text AS released,
+            COALESCE(SUM(CASE WHEN status NOT IN ('hang','forfeited') THEN amount ELSE 0 END), 0)::text AS released,
             COALESCE(SUM(CASE WHEN status='hang' THEN amount ELSE 0 END), 0)::text AS pending
        FROM ledger WHERE note LIKE 'Unilevel Comm%' GROUP BY user_id`,
   );
@@ -1253,7 +1253,7 @@ export async function productCommReport(): Promise<ProductCommReport> {
   const agg = await q<{ user_id: number; bottles: number; released: string; pending: string }>(
     `SELECT user_id,
             COALESCE(SUM((regexp_match(note, 'Qty: ([0-9]+)'))[1]::int), 0)::int AS bottles,
-            COALESCE(SUM(CASE WHEN status<>'hang' THEN amount ELSE 0 END), 0)::text AS released,
+            COALESCE(SUM(CASE WHEN status NOT IN ('hang','forfeited') THEN amount ELSE 0 END), 0)::text AS released,
             COALESCE(SUM(CASE WHEN status='hang' THEN amount ELSE 0 END), 0)::text AS pending
        FROM ledger WHERE note LIKE 'Product Comm%' GROUP BY user_id`,
   );

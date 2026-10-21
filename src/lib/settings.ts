@@ -1,4 +1,4 @@
-import { q } from './db';
+import { exec, q } from './db';
 
 /**
  * Port of MLM_Settings_Cache (plugin v9.6.109).
@@ -74,9 +74,37 @@ async function loadAll(): Promise<Record<string, string>> {
 }
 
 /** Batch-load settings once per request (cached, 5s TTL). */
+let schemaUpgraded = false;
+
+/**
+ * Idempotent runtime schema upgrades for databases created before a change
+ * shipped (deploys do not re-run sql/schema.sql). Memoized per process;
+ * retried on the next call if the ALTER fails.
+ */
+export async function ensureSchemaUpgrades(): Promise<void> {
+  if (schemaUpgraded) return;
+  try {
+    // FLOATING Commission (LP) monthly reset stores 'forfeited' ledger rows.
+    await exec(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ledger_status_check') THEN
+          ALTER TABLE ledger DROP CONSTRAINT ledger_status_check;
+        END IF;
+        ALTER TABLE ledger ADD CONSTRAINT ledger_status_check
+          CHECK (status IN ('active','hang','released','forfeited'));
+      END $$;
+    `);
+    schemaUpgraded = true;
+  } catch {
+    /* leave flag unset: retried on a later request */
+  }
+}
+
 export async function ensureSettings(force = false): Promise<Record<string, string>> {
   const fresh = cache && Date.now() - cacheLoadedAt < CACHE_TTL_MS;
   if (fresh && !force) return cache as Record<string, string>;
+  await ensureSchemaUpgrades();
   cache = await loadAll();
   cacheLoadedAt = Date.now();
   return cache;

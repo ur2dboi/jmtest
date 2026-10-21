@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS ledger (
   tax_deducted   NUMERIC(18,2) NOT NULL DEFAULT 0,
   fee_deducted   NUMERIC(18,2) NOT NULL DEFAULT 0,
   type           VARCHAR(10)   NOT NULL DEFAULT 'cash' CHECK (type IN ('cash','gc','hang')),
-  status         VARCHAR(10)   NOT NULL DEFAULT 'active' CHECK (status IN ('active','hang','released')),
+  status         VARCHAR(10)   NOT NULL DEFAULT 'active' CHECK (status IN ('active','hang','released','forfeited')),
   note           TEXT          NOT NULL DEFAULT '',
   created_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );

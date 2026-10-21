@@ -3,7 +3,7 @@
 export type Position = 'L' | 'C' | 'R';
 export type AccountType = 'MA' | 'CA';
 export type LedgerType = 'cash' | 'gc' | 'hang';
-export type LedgerStatus = 'active' | 'hang' | 'released';
+export type LedgerStatus = 'active' | 'hang' | 'released' | 'forfeited';
 export type PinStatus = 'unused' | 'used' | 'pending_payment';
 export type OrderStatus = 'pending' | 'approved' | 'rejected';
 export type ActivationStatus = 'pending' | 'active';

@@ -418,7 +418,7 @@ export async function resyncWallet(userId: number): Promise<number> {
   const earned = Number(
     (await scalar<string>(
       `SELECT COALESCE(SUM(amount),0) FROM ledger
-       WHERE user_id = $1 AND type = 'cash' AND amount > 0 AND status <> 'hang'
+       WHERE user_id = $1 AND type = 'cash' AND amount > 0 AND status NOT IN ('hang', 'forfeited')
          AND note NOT LIKE '%Encashment%'`,
       [userId],
     )) ?? 0,

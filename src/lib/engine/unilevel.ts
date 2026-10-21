@@ -202,39 +202,90 @@ export async function processUnilevelCommission(
 }
 
 /** Release last month's held unilevel commissions once the cutoff passes. */
+/**
+ * Monthly settlement (FLOATING Commission (LP) -> earnings).
+ *
+ * On the 1st of the following month, each member's held (FLOATING) Unilevel +
+ * Product Comm rows from a prior month settle PER ACCRUAL MONTH:
+ *  - Maintained that month (5+ LP activated): amount is credited to the
+ *    wallet (Total Earnings / Available Balance) and rows become 'released'.
+ *  - Not maintained: the floating commission resets to zero — rows become
+ *    'forfeited' (kept in history, never paid out).
+ * Accounts on hold are skipped and retried on a later settlement run.
+ */
+async function lpActivatedInMonth(userId: number, monthKey: string): Promise<number> {
+  if (!unilevelMonthlyResetOn()) return getMonthlyLp(userId); // lifetime counter
+  const n = await scalar<string>(
+    `SELECT COUNT(*) FROM pins
+     WHERE is_product = 1 AND status = 'used'
+       AND COALESCE(used_by, purchaser_id) = $1
+       AND to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $2`,
+    [userId, monthKey],
+  );
+  return Number(n ?? 0);
+}
+
 export async function releaseMaturedUnilevelCommissions(): Promise<number> {
   if (!unilevelCutoffHoldOn()) return 0;
   const currentPeriod = phMonthKey();
 
-  const rows = await q<{ user_id: number; total: string }>(
-    `SELECT user_id, COALESCE(SUM(amount),0)::text AS total
+  const groups = await q<{ user_id: number; accrual_month: string; total: string }>(
+    `SELECT user_id,
+            to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') AS accrual_month,
+            COALESCE(SUM(amount),0)::text AS total
      FROM ledger
      WHERE (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%') AND type = 'cash' AND status = 'hang'
        AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') < $1
-     GROUP BY user_id`,
+     GROUP BY user_id, accrual_month`,
     [currentPeriod],
   );
 
-  const released: number[] = [];
-  for (const r of rows) {
-    const uid = Number(r.user_id);
-    const amt = Number(r.total);
-    if (uid <= 0 || amt <= 0) continue;
+  let settled = 0;
+  for (const g of groups) {
+    // One bad group must never break a dashboard load; it is retried next run.
+    try {
+      await settleFloatingGroup(g, currentPeriod);
+      settled++;
+    } catch (e) {
+      console.error('FLOATING settlement failed for group', g, e);
+    }
+  }
+  return settled;
+}
+
+async function settleFloatingGroup(
+  g: { user_id: number; accrual_month: string; total: string },
+  currentPeriod: string,
+): Promise<void> {
+  {
+    const uid = Number(g.user_id);
+    const amt = Number(g.total);
+    if (uid <= 0) return;
     const u = await userById(uid);
-    if (isAccountOnHold(u)) continue;
-    await addToWallet(uid, amt);
-    released.push(uid);
+    if (isAccountOnHold(u)) return; // retried on a later run
+
+    const maintained = (await lpActivatedInMonth(uid, g.accrual_month)) >= 5;
+    if (maintained) {
+      if (amt > 0) await addToWallet(uid, amt);
+      await exec(
+        `UPDATE ledger SET status = 'released'
+         WHERE user_id = $1 AND (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%')
+           AND type = 'cash' AND status = 'hang'
+           AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $2`,
+        [uid, g.accrual_month],
+      );
+    } else {
+      // No active maintenance in the accrual month: floating resets to zero.
+      await exec(
+        `UPDATE ledger SET status = 'forfeited',
+             note = regexp_replace(note, ' - (Floating \\(LP\\)|Pending Cutoff)$', '') || ' - Forfeited (No Maintenance)'
+         WHERE user_id = $1 AND (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%')
+           AND type = 'cash' AND status = 'hang'
+           AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $2`,
+        [uid, g.accrual_month],
+      );
+    }
   }
-  if (released.length) {
-    await exec(
-      `UPDATE ledger SET status = 'released'
-       WHERE user_id = ANY($1::bigint[]) AND (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%')
-         AND type = 'cash' AND status = 'hang'
-         AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') < $2`,
-      [released, currentPeriod],
-    );
-  }
-  return released.length;
 }
 
 /** Rebuild unilevel rows from used product pins (scope-aware). */

@@ -1265,7 +1265,7 @@ function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
                   <td>@{l.username}</td>
                   <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : l.status === 'forfeited' ? <span className="font-semibold text-red-400">Forfeited</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
                 </tr>
               ))}
@@ -1366,7 +1366,7 @@ function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
                   <td>@{l.username}</td>
                   <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
+                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : l.status === 'forfeited' ? <span className="font-semibold text-red-400">Forfeited</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
                 </tr>
               ))}
