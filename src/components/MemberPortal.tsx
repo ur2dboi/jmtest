@@ -529,28 +529,12 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
 
   return (
     <div className="animate-fadeIn space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Unilevel Released" value={peso(earn.unilevel)} accent sub="Credited to wallet" />
         <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
         <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(floatingTotal)}</span>} />
         <Stat label="My LP (Maintenance)" value={`${data.lp} LP`} sub={data.lpEligible ? 'Eligible ✓ (≥ 5 LP)' : `Need ${lpNeeded} more LP to qualify`} />
-      </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Stat label="Starter Bottles Credited" value={String(pc.bottles)} sub="From direct Starter repeat orders" />
-        <Stat label="Product Comm Rate per Bottle" value={peso(pc.perBottle)} sub="Direct sponsor only" />
-        <Stat label="Compression" value="Dynamic" sub="Ineligible/Starter uplines are skipped, not charged a tier" />
-      </div>
-
-      <div className="card">
-        <h3 className="text-[16px] font-bold text-gold">📶 Unilevel Commission Matrix (₱ per bottle)</h3>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
-          {d.rates.map((r, i) => (
-            <div key={i} className="rounded-lg border border-line bg-[#0a0a0a] px-3 py-2 text-center">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Level {i + 1}</div>
-              <div className="text-[15px] font-extrabold text-zinc-100">{peso(r)}</div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {d.levelTotals.length > 0 && (
