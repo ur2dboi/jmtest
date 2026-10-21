@@ -42,8 +42,7 @@ const TABS: { id: string; label: string; icon: string; hideForChild?: boolean }[
   { id: 'mtab-overview', label: 'Dashboard', icon: '📊' },
   { id: 'mtab-transactions', label: 'Transactions', icon: '📃' },
   { id: 'mtab-reports', label: 'Income Reports', icon: '📈' },
-  { id: 'mtab-unilevel', label: 'Unilevel', icon: '📶', hideForChild: true },
-  { id: 'mtab-prodcomm', label: 'Product Commission', icon: '🧴', hideForChild: true },
+  { id: 'mtab-unilevel', label: 'Unilevel & Product Commission', icon: '📶', hideForChild: true },
   { id: 'mtab-tree', label: 'Genealogy', icon: '🌳' },
   { id: 'mtab-encash', label: 'Encashment', icon: '💸' },
   { id: 'mtab-purchasing', label: 'Purchasing', icon: '🛒' },
@@ -178,7 +177,6 @@ export default function MemberPortal(props: MemberPortalProps) {
         {tab === 'mtab-transactions' && <TransactionsTab data={data} />}
         {tab === 'mtab-reports' && <ReportsTab data={data} />}
         {tab === 'mtab-unilevel' && !isChild && <UnilevelTab {...props} post={post} busy={busy} />}
-        {tab === 'mtab-prodcomm' && !isChild && <ProductCommTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-purchasing' && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
@@ -221,7 +219,7 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
           <SummaryRow label="A+B Pairing Bonus" value={peso(earn.pairingReleased)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Tri-Leg Bonus" value={peso(earn.tri)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
-          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-prodcomm')} />
+          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
           <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
             <span>FLOATING Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff + earn.productCommPending)}</strong>
           </div>
@@ -334,8 +332,8 @@ function StarterBenefitsCard({ data, setTab }: { data: MemberPortalData; setTab:
                 <span className="text-zinc-400">FLOATING (LP)</span>
                 <strong className="text-amber-300">{peso(earn.productCommPending)}</strong>
               </div>
-              <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-prodcomm')}>
-                View Product Commission tab →
+              <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')}>
+                View Unilevel &amp; Product Commission tab →
               </button>
             </div>
           ) : null}
@@ -445,12 +443,13 @@ function TransactionsTab({ data }: { data: MemberPortalData }) {
 }
 
 /* ============================ REPORTS ============================ */
-const REPORT_FILTERS = ['All', 'Direct Referral', 'Pairing', 'Trifinity Pair', 'Unilevel', 'GC', 'Flush'] as const;
+const REPORT_FILTERS = ['All', 'Direct Referral', 'Pairing', 'Trifinity Pair', 'Unilevel', 'Product Commission', 'GC', 'Flush'] as const;
 const FILTER_TERMS: Record<string, string[]> = {
   Pairing: ['a+b', 'pairing bonus'],
   'Trifinity Pair': ['tri-leg'],
   'Direct Referral': ['direct referral'],
-  Unilevel: ['unilevel', 'product comm'],
+  Unilevel: ['unilevel'],
+  'Product Commission': ['product comm'],
   GC: ['gc'],
   Flush: ['flush out', 'exceeded daily limit'],
 };
@@ -476,7 +475,7 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
         <h3 className="text-[16px] font-bold text-gold">📈 Income Report: {filter}</h3>
         <select className="select !w-auto" value={filter} onChange={(e) => setFilter(e.target.value as never)}>
           {REPORT_FILTERS.map((f) => (
-            <option key={f} value={f}>{f === 'All' ? 'All Earnings' : f === 'Pairing' ? 'A+B Pairing Bonus' : f === 'Trifinity Pair' ? 'Trifinity Pair' : f === 'Unilevel' ? 'Unilevel Comm' : f === 'GC' ? 'Available GC' : f === 'Flush' ? 'Daily Limit' : 'Direct Referral Bonus'}</option>
+            <option key={f} value={f}>{f === 'All' ? 'All Earnings' : f === 'Pairing' ? 'A+B Pairing Bonus' : f === 'Trifinity Pair' ? 'Trifinity Pair' : f === 'Unilevel' ? 'Unilevel Comm' : f === 'Product Commission' ? 'Product Commission' : f === 'GC' ? 'Available GC' : f === 'Flush' ? 'Daily Limit' : 'Direct Referral Bonus'}</option>
           ))}
         </select>
       </div>
@@ -510,25 +509,40 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
   );
 }
 
-/* ============================ UNILEVEL ============================ */
+/* ==================== UNILEVEL & PRODUCT COMMISSION ==================== */
 function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; busy: boolean }) {
   const earn = data.earnings;
   const d = data.unilevelDetail;
+  const pc = data.productCommDetail;
   const lpNeeded = Math.max(0, 5 - data.lp);
-  const [reqProduct, setReqProduct] = React.useState(0);
-  const [reqQty, setReqQty] = React.useState(1);
+  const [uniProduct, setUniProduct] = React.useState(0);
+  const [uniQty, setUniQty] = React.useState(1);
+  const [pcProduct, setPcProduct] = React.useState(0);
+  const [pcQty, setPcQty] = React.useState(1);
+  const floatingTotal = earn.unilevelPendingCutoff + earn.productCommPending;
+  const history = [
+    ...d.rows.map((l) => ({ ...l, kind: 'Unilevel' as const })),
+    ...pc.rows.map((l) => ({ ...l, kind: 'Product Comm' as const })),
+  ]
+    .sort((a, b) => Number(b.id) - Number(a.id))
+    .slice(0, 100);
+
   return (
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Unilevel Released" value={peso(earn.unilevel)} accent sub="Credited to wallet" />
-        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
+        <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
+        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(floatingTotal)}</span>} />
         <Stat label="My LP (Maintenance)" value={`${data.lp} LP`} sub={data.lpEligible ? 'Eligible ✓ (≥ 5 LP)' : `Need ${lpNeeded} more LP to qualify`} />
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Stat label="Starter Bottles Credited" value={String(pc.bottles)} sub="From direct Starter repeat orders" />
+        <Stat label="Product Comm Rate per Bottle" value={peso(pc.perBottle)} sub="Direct sponsor only" />
         <Stat label="Compression" value="Dynamic" sub="Ineligible/Starter uplines are skipped, not charged a tier" />
       </div>
 
       <div className="card">
         <h3 className="text-[16px] font-bold text-gold">📶 Unilevel Commission Matrix (₱ per bottle)</h3>
-        
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
           {d.rates.map((r, i) => (
             <div key={i} className="rounded-lg border border-line bg-[#0a0a0a] px-3 py-2 text-center">
@@ -537,7 +551,6 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
             </div>
           ))}
         </div>
-        
       </div>
 
       {d.levelTotals.length > 0 && (
@@ -560,34 +573,64 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
         </div>
       )}
 
-      <div className="card" style={{ borderColor: '#065f46' }}>
-        <h3 className="text-[16px] font-bold text-emerald-400">🧾 Request Unilevel Codes</h3>
-        
-        <form
-          className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            await post({ action: 'request-unilevel-codes', item_id: reqProduct, qty: reqQty });
-            setReqQty(1);
-          }}
-        >
-          <div>
-            <span className="lbl">Product</span>
-            <select className="select" value={reqProduct} onChange={(e) => setReqProduct(Number(e.target.value))}>
-              <option value={0}>-- Choose Product --</option>
-              {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
-            </select>
-          </div>
-          <div>
-            <span className="lbl">Quantity (codes)</span>
-            <input type="number" min={1} max={50} className="input" value={reqQty} onChange={(e) => setReqQty(Math.max(1, Number(e.target.value) || 1))} />
-          </div>
-          <div className="flex items-end">
-            <button type="submit" disabled={busy || !reqProduct} className="btn w-full !bg-emerald-700 font-bold text-white hover:!bg-emerald-600 disabled:opacity-40 sm:w-auto">
-              Request Codes
-            </button>
-          </div>
-        </form>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="card" style={{ borderColor: '#065f46' }}>
+          <h3 className="text-[16px] font-bold text-emerald-400">🧾 Request Unilevel Codes</h3>
+          <form
+            className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await post({ action: 'request-unilevel-codes', item_id: uniProduct, qty: uniQty });
+              setUniQty(1);
+            }}
+          >
+            <div>
+              <span className="lbl">Product</span>
+              <select className="select" value={uniProduct} onChange={(e) => setUniProduct(Number(e.target.value))}>
+                <option value={0}>-- Choose Product --</option>
+                {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
+              </select>
+            </div>
+            <div>
+              <span className="lbl">Quantity (codes)</span>
+              <input type="number" min={1} max={50} className="input" value={uniQty} onChange={(e) => setUniQty(Math.max(1, Number(e.target.value) || 1))} />
+            </div>
+            <div className="flex items-end">
+              <button type="submit" disabled={busy || !uniProduct} className="btn w-full !bg-emerald-700 font-bold text-white hover:!bg-emerald-600 disabled:opacity-40 sm:w-auto">
+                Request Codes
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="card" style={{ borderColor: '#0e7490' }}>
+          <h3 className="text-[16px] font-bold text-cyan-300">🧾 Request Product Codes</h3>
+          <form
+            className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await post({ action: 'request-product-codes', item_id: pcProduct, qty: pcQty });
+              setPcQty(1);
+            }}
+          >
+            <div>
+              <span className="lbl">Product</span>
+              <select className="select" value={pcProduct} onChange={(e) => setPcProduct(Number(e.target.value))}>
+                <option value={0}>-- Choose Product --</option>
+                {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
+              </select>
+            </div>
+            <div>
+              <span className="lbl">Quantity (codes)</span>
+              <input type="number" min={1} max={50} className="input" value={pcQty} onChange={(e) => setPcQty(Math.max(1, Number(e.target.value) || 1))} />
+            </div>
+            <div className="flex items-end">
+              <button type="submit" disabled={busy || !pcProduct} className="btn w-full !bg-cyan-700 font-bold text-white hover:!bg-cyan-600 disabled:opacity-40 sm:w-auto">
+                Request Codes
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
 
       {data.unilevelCodeRequests.length > 0 && (
@@ -614,80 +657,6 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
         </div>
       )}
 
-      <div className="card">
-        <h3 className="text-[15px] font-bold text-emerald-400">Unilevel History (latest 100)</h3>
-        <div className="tbl-wrap mt-2">
-          <table className="tbl">
-            <thead><tr><th>Date &amp; Time</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
-            <tbody>
-              {d.rows.length === 0 && (
-                <tr><td colSpan={4} className="text-center text-zinc-500">No Unilevel earnings yet. Activate products and grow your network — commissions from your downlines&apos; product activations appear here.</td></tr>
-              )}
-              {d.rows.map((l) => (
-                <tr key={l.id}>
-                  <td className="text-zinc-500">{dt(l.created_at)}</td>
-                  <td className="!whitespace-normal">{l.note}</td>
-                  <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
-                  <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================ PRODUCT COMMISSION ============================ */
-function ProductCommTab({ data, post, busy }: MemberPortalProps & { post: PostFn; busy: boolean }) {
-  const earn = data.earnings;
-  const d = data.productCommDetail;
-  const rankNorm = (data.user.rank || '').replace(/\s+/g, '').toLowerCase();
-  const isStarter = rankNorm.includes('starter');
-  const isPremiumTier = !isStarter && rankNorm.includes('premium');
-  const lpNeeded = Math.max(0, 5 - data.lp);
-  const [reqProduct, setReqProduct] = React.useState(0);
-  const [reqQty, setReqQty] = React.useState(1);
-  return (
-    <div className="animate-fadeIn space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
-        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
-        <Stat label="Starter Bottles Credited" value={String(d.bottles)} sub="From direct Starter repeat orders" />
-        <Stat label="Rate per Bottle" value={peso(d.perBottle)} sub="Direct sponsor only" />
-      </div>
-
-      <div className="card" style={{ borderColor: '#0e7490' }}>
-        <h3 className="text-[16px] font-bold text-cyan-300">🧾 Request Product Codes</h3>
-        
-        <form
-          className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            await post({ action: 'request-product-codes', item_id: reqProduct, qty: reqQty });
-            setReqQty(1);
-          }}
-        >
-          <div>
-            <span className="lbl">Product</span>
-            <select className="select" value={reqProduct} onChange={(e) => setReqProduct(Number(e.target.value))}>
-              <option value={0}>-- Choose Product --</option>
-              {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
-            </select>
-          </div>
-          <div>
-            <span className="lbl">Quantity (codes)</span>
-            <input type="number" min={1} max={50} className="input" value={reqQty} onChange={(e) => setReqQty(Math.max(1, Number(e.target.value) || 1))} />
-          </div>
-          <div className="flex items-end">
-            <button type="submit" disabled={busy || !reqProduct} className="btn w-full !bg-cyan-700 font-bold text-white hover:!bg-cyan-600 disabled:opacity-40 sm:w-auto">
-              Request Codes
-            </button>
-          </div>
-        </form>
-      </div>
-
       {data.codeRequests.length > 0 && (
         <div className="card">
           <h3 className="text-[15px] font-bold text-cyan-300">My Product Code Requests</h3>
@@ -713,17 +682,20 @@ function ProductCommTab({ data, post, busy }: MemberPortalProps & { post: PostFn
       )}
 
       <div className="card">
-        <h3 className="text-[15px] font-bold text-cyan-300">Product Commission History (latest 100)</h3>
+        <h3 className="text-[15px] font-bold text-emerald-400">Commission History (latest 100)</h3>
         <div className="tbl-wrap mt-2">
           <table className="tbl">
-            <thead><tr><th>Date &amp; Time</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
+            <thead><tr><th>Date &amp; Time</th><th>Type</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
             <tbody>
-              {d.rows.length === 0 && (
-                <tr><td colSpan={4} className="text-center text-zinc-500">No Product Commission yet. Once a direct Starter under you activates repeat-order products (and you meet 5 LP), each bottle appears here at {peso(d.perBottle)}.</td></tr>
+              {history.length === 0 && (
+                <tr><td colSpan={5} className="text-center text-zinc-500">No commissions yet. Earnings from your downlines&apos; product activations (Unilevel) and direct Starters&apos; repeat orders (Product Commission) appear here.</td></tr>
               )}
-              {d.rows.map((l) => (
-                <tr key={l.id}>
+              {history.map((l) => (
+                <tr key={`${l.kind}-${l.id}`}>
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
+                  <td>{l.kind === 'Unilevel'
+                    ? <span className="font-semibold text-emerald-400">Unilevel</span>
+                    : <span className="font-semibold text-cyan-300">Product Comm</span>}</td>
                   <td className="!whitespace-normal">{l.note}</td>
                   <td>{l.status === 'hang' ? <span className="font-semibold text-amber-300">FLOATING (LP)</span> : <span className="font-semibold text-emerald-400">Released</span>}</td>
                   <td className="font-bold text-emerald-400">+{peso(l.amount)}</td>
