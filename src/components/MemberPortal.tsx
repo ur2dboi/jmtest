@@ -205,6 +205,11 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
         <Stat label="Encashment" value={peso(earn.totalEncashed)} sub="Withdrawals from available commission" />
       </div>
 
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Stat label="Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
+        <Stat label="Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
+      </div>
+
       {!data.isChildLogin && caSlotsOpen > 0 && (
         <div className="card" style={{ borderColor: '#3b82f6' }}>
           <h3 className="text-[15px] font-bold text-blue-400">⚙️ Child Account Activation (Optional — {caSlotsOpen} of 3 slots available)</h3>
@@ -261,11 +266,6 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
             Spillover gate (3+9): {data.gateComplete ? <span className="text-emerald-400">Complete — Right→Right→Right active</span> : <span className="text-amber-300">Not yet complete</span>}
           </p>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Stat label="Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
-        <Stat label="Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
       </div>
 
       <StarterBenefitsCard data={data} setTab={setTab} />
