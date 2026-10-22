@@ -223,12 +223,6 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
           <SummaryRow label="Tri-Leg Bonus" value={peso(earn.tri)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
           <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
-          <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
-            <span>FLOATING Unilevel Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff)}</strong>
-          </div>
-          <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
-            <span>FLOATING Product Commission (PC)</span><strong>{peso(earn.productCommPending)}</strong>
-          </div>
           <div className="flex items-center justify-between py-1 text-[13px]">
             <span className="text-emerald-400">Available GC</span><strong className="text-emerald-400">{earn.gc}</strong>
           </div>
@@ -267,6 +261,11 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
             Spillover gate (3+9): {data.gateComplete ? <span className="text-emerald-400">Complete — Right→Right→Right active</span> : <span className="text-amber-300">Not yet complete</span>}
           </p>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Stat label="FLOATING Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
+        <Stat label="FLOATING Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
       </div>
 
       <StarterBenefitsCard data={data} setTab={setTab} />
