@@ -264,8 +264,8 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Stat label="FLOATING Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
-        <Stat label="FLOATING Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
+        <Stat label="Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
+        <Stat label="Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
       </div>
 
       <StarterBenefitsCard data={data} setTab={setTab} />
@@ -560,8 +560,8 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
         </div>
       )}
       <div className={`grid grid-cols-1 gap-3 ${isStarter ? '' : 'sm:grid-cols-2'}`}>
-        {!isStarter && <Stat label="FLOATING Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />}
-        <Stat label="FLOATING Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
+        {!isStarter && <Stat label="Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />}
+        <Stat label="Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
       </div>
 
       {!isStarter && d.levelTotals.length > 0 && (
