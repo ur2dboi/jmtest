@@ -65,7 +65,10 @@ export default function MemberPortal(props: MemberPortalProps) {
   const [toast, setToast] = useToast();
   const [busy, setBusy] = React.useState(false);
 
-  const visibleTabs = TABS.filter((t) => !(isChild && t.hideForChild));
+  // Starter Child Accounts cannot access Purchasing (commissions stay Mother-only).
+  const activeRankNorm = ((data.activeAccount?.rank_snapshot || user.rank || '') as string).replace(/\s+/g, '').toLowerCase();
+  const isStarterChild = isChild && activeRankNorm.includes('starter');
+  const visibleTabs = TABS.filter((t) => !(isChild && t.hideForChild) && !(isStarterChild && t.id === 'mtab-purchasing'));
 
   async function post(payload: Record<string, unknown>, successMsg?: string) {
     setBusy(true);
@@ -179,7 +182,7 @@ export default function MemberPortal(props: MemberPortalProps) {
         {tab === 'mtab-unilevel' && !isChild && <UnilevelTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
-        {tab === 'mtab-purchasing' && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
+        {tab === 'mtab-purchasing' && !isStarterChild && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
         {tab === 'mtab-product-vault' && !isChild && <ProductVaultTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-associates' && !isChild && <AssociatesTab associates={props.associates} />}
         {tab === 'mtab-profile' && <ProfileTab {...props} post={post} busy={busy} />}
@@ -221,7 +224,10 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
           <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
           <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
           <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
-            <span>FLOATING Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff + earn.productCommPending)}</strong>
+            <span>FLOATING Unilevel Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff)}</strong>
+          </div>
+          <div className="flex items-center justify-between py-1 text-[13px] text-amber-300">
+            <span>FLOATING Product Commission (PC)</span><strong>{peso(earn.productCommPending)}</strong>
           </div>
           <div className="flex items-center justify-between py-1 text-[13px]">
             <span className="text-emerald-400">Available GC</span><strong className="text-emerald-400">{earn.gc}</strong>
@@ -525,25 +531,41 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
   const [uniQty, setUniQty] = React.useState(1);
   const [pcProduct, setPcProduct] = React.useState(0);
   const [pcQty, setPcQty] = React.useState(1);
-  const floatingTotal = earn.unilevelPendingCutoff + earn.productCommPending;
-  const history = [
-    ...d.rows.map((l) => ({ ...l, kind: 'Unilevel' as const })),
-    ...pc.rows.map((l) => ({ ...l, kind: 'Product Comm' as const })),
-  ]
+  // Regular (Mother) Starter accounts access Product Commission only;
+  // Unilevel sections unlock when they upgrade to Premium/StarPremium.
+  const isStarter = /starter/i.test((data.user.rank || '').replace(/\s+/g, ''));
+  const history = (
+    isStarter
+      ? pc.rows.map((l) => ({ ...l, kind: 'Product Comm' as const }))
+      : [
+          ...d.rows.map((l) => ({ ...l, kind: 'Unilevel' as const })),
+          ...pc.rows.map((l) => ({ ...l, kind: 'Product Comm' as const })),
+        ]
+  )
     .sort((a, b) => Number(b.id) - Number(a.id))
     .slice(0, 100);
 
   return (
     <div className="animate-fadeIn space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Unilevel Released" value={peso(earn.unilevel)} accent sub="Credited to wallet" />
-        <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
-        <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(floatingTotal)}</span>} />
-        <Stat label="My LP (Maintenance)" value={`${data.lp} LP`} sub={data.lpEligible ? 'Eligible ✓ (≥ 5 LP)' : `Need ${lpNeeded} more LP to qualify`} />
-        <Stat label="Starter Bottles Credited" value={String(pc.bottles)} sub="From direct Starter repeat orders" />
+      {isStarter ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
+          <Stat label="My LP (Maintenance)" value={`${data.lp} LP`} sub={data.lpEligible ? 'Eligible ✓ (≥ 5 LP)' : `Need ${lpNeeded} more LP to qualify`} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat label="Unilevel Released" value={peso(earn.unilevel)} accent sub="Credited to wallet" />
+          <Stat label="Product Comm Released" value={peso(earn.productComm)} accent sub="Credited to wallet" />
+          <Stat label="My LP (Maintenance)" value={`${data.lp} LP`} sub={data.lpEligible ? 'Eligible ✓ (≥ 5 LP)' : `Need ${lpNeeded} more LP to qualify`} />
+          <Stat label="Starter Bottles Credited" value={String(pc.bottles)} sub="From direct Starter repeat orders" />
+        </div>
+      )}
+      <div className={`grid grid-cols-1 gap-3 ${isStarter ? '' : 'sm:grid-cols-2'}`}>
+        {!isStarter && <Stat label="FLOATING Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />}
+        <Stat label="FLOATING Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
       </div>
 
-      {d.levelTotals.length > 0 && (
+      {!isStarter && d.levelTotals.length > 0 && (
         <div className="card">
           <h3 className="text-[15px] font-bold text-emerald-400">Earnings by Compressed Level</h3>
           <div className="tbl-wrap mt-2">
@@ -563,7 +585,8 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-4 ${isStarter ? '' : 'lg:grid-cols-2'}`}>
+        {!isStarter && (
         <div className="card" style={{ borderColor: '#065f46' }}>
           <h3 className="text-[16px] font-bold text-emerald-400">🧾 Request Unilevel Codes</h3>
           <form
@@ -593,6 +616,7 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
           </form>
         </div>
 
+        )}
         <div className="card" style={{ borderColor: '#0e7490' }}>
           <h3 className="text-[16px] font-bold text-cyan-300">🧾 Request Product Codes</h3>
           <form
@@ -623,7 +647,7 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
         </div>
       </div>
 
-      {data.unilevelCodeRequests.length > 0 && (
+      {!isStarter && data.unilevelCodeRequests.length > 0 && (
         <div className="card">
           <h3 className="text-[15px] font-bold text-emerald-400">My Unilevel Code Requests</h3>
           <div className="tbl-wrap mt-2">
@@ -672,13 +696,13 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
       )}
 
       <div className="card">
-        <h3 className="text-[15px] font-bold text-emerald-400">Commission History (latest 100)</h3>
+        <h3 className="text-[15px] font-bold text-emerald-400">{isStarter ? 'Product Commission History (latest 100)' : 'Commission History (latest 100)'}</h3>
         <div className="tbl-wrap mt-2">
           <table className="tbl">
             <thead><tr><th>Date &amp; Time</th><th>Type</th><th>Details</th><th>Status</th><th>Amount</th></tr></thead>
             <tbody>
               {history.length === 0 && (
-                <tr><td colSpan={5} className="text-center text-zinc-500">No commissions yet. Earnings from your downlines&apos; product activations (Unilevel) and direct Starters&apos; repeat orders (Product Commission) appear here.</td></tr>
+                <tr><td colSpan={5} className="text-center text-zinc-500">{isStarter ? 'No Product Commission yet. Earnings from your direct Starters\' repeat orders appear here once you upgrade to Premium or StarPremium.' : 'No commissions yet. Earnings from your downlines\' product activations (Unilevel) and direct Starters\' repeat orders (Product Commission) appear here.'}</td></tr>
               )}
               {history.map((l) => (
                 <tr key={`${l.kind}-${l.id}`}>
@@ -1455,7 +1479,8 @@ function ProfileTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) 
             <strong className="text-violet-300">{peso(earn.pairingReleased + earn.tri)} <small className="font-normal">({data.activeAccount.pairing_count} tri-leg triggers / {earn.gc} GC)</small></strong>
           </div>
           <div className="flex justify-between"><span>Unilevel Commission</span><strong>{peso(earn.unilevel)}</strong></div>
-          <div className="flex justify-between text-amber-300"><span>FLOATING Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff + earn.productCommPending)}</strong></div>
+          <div className="flex justify-between text-amber-300"><span>FLOATING Unilevel Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff)}</strong></div>
+          <div className="flex justify-between text-amber-300"><span>FLOATING Product Commission (PC)</span><strong>{peso(earn.productCommPending)}</strong></div>
           <div className="flex justify-between"><span>Available GC</span><strong className="text-sky-400">{earn.gc}</strong></div>
           <div className="flex justify-between border-t border-dashed border-line pt-2 font-bold"><span>TOTAL EARNINGS</span><strong className="text-gold">{peso(earn.totalEarned)}</strong></div>
           <div className="flex justify-between"><span>Total Encashed</span><strong className="text-red-400">-{peso(earn.totalEncashed)}</strong></div>

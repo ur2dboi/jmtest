@@ -211,6 +211,8 @@ export async function POST(req: Request) {
     if (action === 'request-product-codes' || action === 'request-unilevel-codes') {
       if (loggedInAsChild) return fail('Child Accounts cannot request codes. Please use the Mother Account.');
       const isUni = action === 'request-unilevel-codes';
+      // Starter accounts access Product Commission only; Unilevel unlocks on upgrade.
+      if (isUni && isStarterRank(user.rank)) return fail('Unilevel is available to Premium and StarPremium accounts. Starter accounts may request Product Codes under Product Commission.');
       const itemId = Number(b.item_id ?? 0);
       const qty = Math.min(50, Math.max(1, Number(b.qty ?? 1)));
       const pkg = await one<PackageRow>('SELECT * FROM packages WHERE id=$1 AND status=1 AND is_product=1', [itemId]);
