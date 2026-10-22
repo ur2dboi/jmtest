@@ -42,7 +42,6 @@ const TABS: { id: string; label: string; icon: string; hideForChild?: boolean }[
   { id: 'mtab-overview', label: 'Dashboard', icon: '📊' },
   { id: 'mtab-transactions', label: 'Transactions', icon: '📃' },
   { id: 'mtab-reports', label: 'Income Reports', icon: '📈' },
-  { id: 'mtab-unilevel', label: 'Unilevel & Product Commission', icon: '📶', hideForChild: true },
   { id: 'mtab-tree', label: 'Genealogy', icon: '🌳' },
   { id: 'mtab-encash', label: 'Encashment', icon: '💸' },
   { id: 'mtab-purchasing', label: 'Purchasing', icon: '🛒' },
@@ -179,7 +178,6 @@ export default function MemberPortal(props: MemberPortalProps) {
         )}
         {tab === 'mtab-transactions' && <TransactionsTab data={data} />}
         {tab === 'mtab-reports' && <ReportsTab data={data} />}
-        {tab === 'mtab-unilevel' && !isChild && <UnilevelTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-purchasing' && !isStarterChild && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
@@ -226,8 +224,8 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
           <SummaryRow label="Direct Referral Bonus" value={peso(earn.dr)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="A+B Pairing Bonus" value={peso(earn.pairingReleased)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Tri-Leg Bonus" value={peso(earn.tri)} onClick={() => setTab('mtab-reports')} />
-          <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
-          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')} />
+          <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-purchasing')} />
+          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-purchasing')} />
           <div className="flex items-center justify-between py-1 text-[13px]">
             <span className="text-emerald-400">Available GC</span><strong className="text-emerald-400">{earn.gc}</strong>
           </div>
@@ -337,8 +335,8 @@ function StarterBenefitsCard({ data, setTab }: { data: MemberPortalData; setTab:
                 <span className="text-zinc-400">FLOATING (LP)</span>
                 <strong className="text-amber-300">{peso(earn.productCommPending)}</strong>
               </div>
-              <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-unilevel')}>
-                View Unilevel &amp; Product Commission tab →
+              <button type="button" className="text-[12px] text-gold underline-offset-2 hover:underline" onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-purchasing')}>
+                View Purchasing tab →
               </button>
             </div>
           ) : null}
@@ -1005,6 +1003,8 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
   const [pkgQty, setPkgQty] = React.useState(1);
   const [pkgMop, setPkgMop] = React.useState('Cash (Walk-in)');
   const orders = data.orders.filter((o) => !/^(UNILEVEL )?CODE REQUEST:/i.test(o.order_details || ''));
+  const rankNormLocal = (data.user.rank || '').replace(/\s+/g, '').toLowerCase();
+  const isStarterRankLocal = rankNormLocal.includes('starter');
 
   return (
     <div className="animate-fadeIn space-y-4">
@@ -1139,6 +1139,13 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
         <h3 className="text-[15px] font-bold text-zinc-100">🧾 Purchase History</h3>
         <OrderHistory orders={orders} tone="text-zinc-200" />
       </div>
+
+      {!data.isChildLogin && (
+        <>
+          <h3 className="pt-2 text-[16px] font-bold text-gold">{isStarterRankLocal ? '💰 Product Commission' : '📶 Unilevel & Product Commission'}</h3>
+          <UnilevelTab {...props} post={post} busy={busy} />
+        </>
+      )}
     </div>
   );
 }
