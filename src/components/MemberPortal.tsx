@@ -1115,6 +1115,13 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
         </div>
       </div>
 
+      {!data.isChildLogin && (
+        <>
+          <h3 className="pt-2 text-[16px] font-bold text-gold">{isStarterRankLocal ? '💰 Product Commission' : '📶 Unilevel & Product Commission'}</h3>
+          <UnilevelTab {...props} post={post} busy={busy} />
+        </>
+      )}
+
       <div className="card">
         <h3 className="text-[15px] font-bold text-emerald-400">⚡ Admin Activation History</h3>
         <div className="tbl-wrap mt-3">
@@ -1139,13 +1146,6 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
         <h3 className="text-[15px] font-bold text-zinc-100">🧾 Purchase History</h3>
         <OrderHistory orders={orders} tone="text-zinc-200" />
       </div>
-
-      {!data.isChildLogin && (
-        <>
-          <h3 className="pt-2 text-[16px] font-bold text-gold">{isStarterRankLocal ? '💰 Product Commission' : '📶 Unilevel & Product Commission'}</h3>
-          <UnilevelTab {...props} post={post} busy={busy} />
-        </>
-      )}
     </div>
   );
 }
