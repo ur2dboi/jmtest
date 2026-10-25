@@ -252,12 +252,22 @@ export async function POST(req: Request) {
       );
       if (!pin) return fail('Invalid, already used, or transferred code.');
 
+      // Starter accounts cannot access Unilevel codes (activate or transfer);
+      // they may only use Product Commission (PCC) codes. Unilevel codes
+      // unlock on upgrade to Premium/StarPremium.
+      if (isProductAction && /^UNI-/i.test(pin.pin_code || '') && isStarterRank(user.rank)) {
+        return fail('Unilevel Codes are available to Premium and StarPremium accounts only. Starter accounts may use Product Codes.');
+      }
+
       if (action === 'activate-product') {
         const targetName = String(b.target ?? '').trim();
         const target: UserRow | null = targetName
           ? await one<UserRow>('SELECT * FROM users WHERE username=$1', [targetName])
           : user;
         if (!target) return fail(`Username '${targetName}' not found.`);
+        if (/^UNI-/i.test(pin.pin_code || '') && isStarterRank(target.rank)) {
+          return fail('Unilevel Codes cannot be activated for a Starter account. Upgrade to Premium or StarPremium first.');
+        }
         const res = await activateProductPin(Number(target.id), pin.pin_code, 'member', Number(user.id));
         if (!res.ok) return fail(res.error!);
         return ok({

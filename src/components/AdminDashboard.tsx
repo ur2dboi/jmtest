@@ -853,7 +853,7 @@ function ProductOrdersTab(props: AdminProps & { post: PostFn; busy: boolean }) {
                   <td className="!whitespace-normal text-violet-200">{o.order_details}</td>
                   <td>
                     <div className="flex flex-wrap gap-1">
-                      <select className="select !w-[138px] !py-1 !text-[12px]" value={codeTypes[String(o.id)] ?? defaultCodeType(o.rank)} onChange={(e) => setCodeTypes((m) => ({ ...m, [String(o.id)]: e.target.value }))}>
+                      <select className="select !w-[138px] !py-1 !text-[12px]" value={/starter/i.test((o.rank || '').replace(/\s+/g, '')) ? 'PCC' : (codeTypes[String(o.id)] ?? defaultCodeType(o.rank))} disabled={/starter/i.test((o.rank || '').replace(/\s+/g, ''))} title={/starter/i.test((o.rank || '').replace(/\s+/g, '')) ? 'Starter accounts can only receive Product Codes' : 'Choose which code type to send'} onChange={(e) => setCodeTypes((m) => ({ ...m, [String(o.id)]: e.target.value }))}>
                         <option value="UNI">Unilevel Codes</option>
                         <option value="PCC">Product Codes</option>
                       </select>

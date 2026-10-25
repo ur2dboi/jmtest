@@ -309,6 +309,14 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
     )) ?? 0,
   );
 
+  // Starter accounts have no Unilevel-code access: UNI-series pins stay
+  // hidden from their vault/lists until they upgrade to Premium/StarPremium.
+  const hideUniPins = rankNorm.includes('starter');
+  const notUni = (p: PinRow) => !/^UNI-/i.test(p.pin_code || '');
+  const visibleProductPins = hideUniPins ? productPins.filter(notUni) : productPins;
+  const visibleSelfActivated = hideUniPins ? selfActivatedProducts.filter(notUni) : selfActivatedProducts;
+  const visibleAdminActivated = hideUniPins ? adminActivatedProducts.filter(notUni) : adminActivatedProducts;
+
   return {
     user,
     ma,
@@ -325,13 +333,13 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
     canUpgrade,
     upgradePins,
     packagePins,
-    productPins,
+    productPins: visibleProductPins,
     vaultCounts: {
       packages: packagePins.length,
-      products: productPins.length,
+      products: visibleProductPins.length,
       premium: packagePins.filter((p) => /premium/i.test(p.package_type) && !/starpremium/i.test(p.package_type.replace(/\s/g, ''))).length,
       starpremium: packagePins.filter((p) => /starpremium/i.test(p.package_type.replace(/\s/g, ''))).length,
-      all: packagePins.length + productPins.length,
+      all: packagePins.length + visibleProductPins.length,
       activatedThisMonth,
     },
     packages,
@@ -341,8 +349,8 @@ export async function memberPortalData(userId: number, activeNode: string): Prom
     orders,
     codeRequests,
     unilevelCodeRequests,
-    selfActivatedProducts,
-    adminActivatedProducts,
+    selfActivatedProducts: visibleSelfActivated,
+    adminActivatedProducts: visibleAdminActivated,
     gateComplete: ma ? await firstRowsComplete(Number(ma.id)) : false,
     maintenance: setting('mlm_maintenance_mode') === '1',
     unilevelDetail: {

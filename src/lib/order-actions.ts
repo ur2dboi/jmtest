@@ -86,8 +86,10 @@ export async function approveOrder(
   // opts.activate stays an explicit admin "approve + activate now" action.
   const buyer = isProduct ? await userById(Number(order.user_id)) : null;
   const autoActivate = isProduct && opts.activate === true;
+  // Starter buyers are locked to Product (PCC) codes: they cannot access
+  // Unilevel codes, so an admin cannot issue UNI codes to a Starter.
   const series = isProduct && !autoActivate
-    ? (opts.codeType ?? (isStarterRank(buyer?.rank ?? '') ? 'PCC' : 'UNI'))
+    ? (isStarterRank(buyer?.rank ?? '') ? 'PCC' : (opts.codeType ?? 'UNI'))
     : '';
 
   await exec(`UPDATE orders SET status='approved' WHERE id = $1`, [order.id]);
