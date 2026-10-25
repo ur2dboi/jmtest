@@ -150,6 +150,7 @@ export async function processUnilevelCommission(
   buyerUserId: number,
   qty = 1,
   eventTime?: Date | string | null,
+  kind?: 'UNI' | 'PCC' | null,
 ): Promise<number> {
   const buyer = Number(buyerUserId);
   const amount = Math.max(1, Number(qty) || 1);
@@ -157,10 +158,24 @@ export async function processUnilevelCommission(
 
   const buyerRow = await userById(buyer);
   if (!buyerRow) return 0;
-  // Starter repeat orders: Starter buyers earn no Unilevel themselves, but
-  // their DIRECT Premium/StarPremium sponsor receives the flat Starter
-  // Product Commission (₱20/bottle) once that sponsor meets 5 LP.
-  if (isStarterRank(buyerRow.rank)) return payStarterDirectProductComm(buyerRow, amount, when);
+  // Unilevel and Product Commission follow SEPARATE rules, decided by the
+  // code type the admin issued (pin series), with rank eligibility:
+  //  - PCC (Product) codes pay the Product Commission only for Starter
+  //    activations: per-bottle to their DIRECT Premium/StarPremium sponsor
+  //    once that sponsor meets 5 LP (payStarterDirectProductComm).
+  //  - UNI (Unilevel) codes pay Unilevel compression only for
+  //    Premium/StarPremium activations; a Starter activating a UNI code
+  //    earns the LP credit only, no commissions.
+  //  - Plain (legacy, no-series) codes keep the rank-based rule below.
+  const buyerIsStarter = isStarterRank(buyerRow.rank);
+  if (kind === 'PCC') {
+    return buyerIsStarter ? payStarterDirectProductComm(buyerRow, amount, when) : 0;
+  }
+  if (kind === 'UNI') {
+    if (buyerIsStarter) return 0;
+  } else if (buyerIsStarter) {
+    return payStarterDirectProductComm(buyerRow, amount, when);
+  }
 
   const matrix = unilevelMatrix();
   const uplines = await getStructuralUnilevelUplines(buyer, 100);
@@ -300,32 +315,34 @@ export async function rebuildUnilevelCommissionsScope(currentPeriodOnly?: boolea
          AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $1`,
       [period],
     );
-    const rows = await q<{ activator_id: number; event_date: string; qty: string }>(
+    const rows = await q<{ activator_id: number; event_date: string; qty: string; kind: string }>(
       `SELECT COALESCE(used_by, purchaser_id) AS activator_id,
               to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS event_date,
+              CASE WHEN pin_code LIKE 'UNI-%' THEN 'UNI' WHEN pin_code LIKE 'PCC-%' THEN 'PCC' ELSE '' END AS kind,
               COUNT(*)::text AS qty
        FROM pins
        WHERE is_product = 1 AND status = 'used'
          AND to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $1
-       GROUP BY activator_id, event_date`,
+       GROUP BY activator_id, event_date, kind`,
       [period],
     );
     for (const r of rows) {
-      await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`);
+      await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`, r.kind === 'UNI' || r.kind === 'PCC' ? r.kind : null);
       count += Number(r.qty);
     }
   } else {
     await exec(`DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%'`);
-    const rows = await q<{ activator_id: number; event_date: string; qty: string }>(
+    const rows = await q<{ activator_id: number; event_date: string; qty: string; kind: string }>(
       `SELECT COALESCE(used_by, purchaser_id) AS activator_id,
               to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS event_date,
+              CASE WHEN pin_code LIKE 'UNI-%' THEN 'UNI' WHEN pin_code LIKE 'PCC-%' THEN 'PCC' ELSE '' END AS kind,
               COUNT(*)::text AS qty
        FROM pins
        WHERE is_product = 1 AND status = 'used'
-       GROUP BY activator_id, event_date`,
+       GROUP BY activator_id, event_date, kind`,
     );
     for (const r of rows) {
-      await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`);
+      await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`, r.kind === 'UNI' || r.kind === 'PCC' ? r.kind : null);
       count += Number(r.qty);
     }
   }
@@ -340,14 +357,14 @@ export async function rebuildUnilevelCommissionsScope(currentPeriodOnly?: boolea
  * AFTER downlines already activated products, their previously skipped
  * commissions are caught up with a scoped rebuild.
  */
-export async function handleProductActivationUnilevel(activatorId: number, qty = 1): Promise<void> {
+export async function handleProductActivationUnilevel(activatorId: number, qty = 1, kind?: 'UNI' | 'PCC' | null): Promise<void> {
   const id = Number(activatorId);
   const amount = Math.max(1, Number(qty) || 1);
   if (id <= 0) return;
   const oldLp = await getMonthlyLp(id);
   const newLp = await bumpMonthlyLp(id, amount);
   if (oldLp < 5 && newLp >= 5) await rebuildUnilevelCommissionsScope(unilevelMonthlyResetOn());
-  else await processUnilevelCommission(id, amount);
+  else await processUnilevelCommission(id, amount, undefined, kind);
 }
 
 /**

@@ -202,29 +202,30 @@ export async function rebuildStep4Unilevel(
     const periodScoped = unilevelMonthlyResetOn();
     if (periodScoped) {
       await exec(
-        `DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%'
+        `DELETE FROM ledger WHERE (note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%')
            AND to_char(created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM') = $1`,
         [phMonthKey()],
       );
     } else {
-      await exec(`DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%'`);
+      await exec(`DELETE FROM ledger WHERE note LIKE '%Unilevel Comm%' OR note LIKE '%Product Comm%'`);
     }
   }
 
-  const rows = await q<{ activator_id: number; qty: string; event_date: string }>(
+  const rows = await q<{ activator_id: number; qty: string; event_date: string; kind: string }>(
     `SELECT COALESCE(used_by, purchaser_id) AS activator_id,
             to_char(COALESCE(used_at, created_at) AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS event_date,
+            CASE WHEN pin_code LIKE 'UNI-%' THEN 'UNI' WHEN pin_code LIKE 'PCC-%' THEN 'PCC' ELSE '' END AS kind,
             COUNT(*)::text AS qty
      FROM pins
      WHERE is_product = 1 AND status = 'used'
-     GROUP BY activator_id, event_date
+     GROUP BY activator_id, event_date, kind
      ORDER BY event_date ASC, activator_id ASC
      LIMIT $1 OFFSET $2`,
     [limit, offset],
   );
 
   for (const r of rows) {
-    await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`);
+    await processUnilevelCommission(Number(r.activator_id), Number(r.qty), `${r.event_date}T00:00:00+08:00`, r.kind === 'UNI' || r.kind === 'PCC' ? r.kind : null);
   }
 
   const done = rows.length < limit;

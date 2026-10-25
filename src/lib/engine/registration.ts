@@ -744,7 +744,9 @@ export async function activateProductPin(
   const { markProductPinUsed, handleProductActivationUnilevel, usedProductPinCount } = await import('./unilevel');
   await markProductPinUsed(Number(check.pin.id), Number(userId), source, actorId);
   await exec('UPDATE users SET lp = lp + 1 WHERE id = $1', [Number(userId)]);
-  await handleProductActivationUnilevel(Number(userId), 1);
+  const activatedCode = String(check.pin.pin_code || '');
+  const codeKind = /^UNI-/i.test(activatedCode) ? 'UNI' : /^PCC-/i.test(activatedCode) ? 'PCC' : null;
+  await handleProductActivationUnilevel(Number(userId), 1, codeKind);
   await auditLog({
     actorUserId: actorId || Number(userId),
     actorUsername: source === 'admin' ? (await userById(actorId))?.username ?? 'admin' : user.username,
