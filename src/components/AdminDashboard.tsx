@@ -33,7 +33,7 @@ export interface AdminProps {
   entriesSummary: { unusedPkg: number; usedPkg: number; unusedProd: number; usedProd: number; loose: number };
   members: MemberDirRow[];
   pendingPkgOrders: (OrderRow & { username: string })[];
-  pendingProdOrders: (OrderRow & { username: string })[];
+  pendingProdOrders: (OrderRow & { username: string; rank: string })[];
   activationHistory: (PinRow & { owner?: string; recipient?: string; actor?: string })[];
   pendingEncash: EncashRow[];
   sales: { rows: (OrderRow & { username: string; item: string; code: string; amount: number })[]; total: number };
@@ -76,8 +76,8 @@ const TABS: { id: string; label: string; icon: string; badge?: (p: AdminProps) =
   { id: 'tab-sales-report', label: 'Sales Report', icon: '📈' },
   { id: 'tab-encashment-report', label: 'Encashment Report', icon: '🧾' },
   { id: 'tab-payables-report', label: 'Payables Report', icon: '💵' },
-  { id: 'tab-unilevel', label: 'Unilevel', icon: '📶', badge: (p) => p.unilevelReport.codeRequests.filter((r) => r.status === 'pending').length },
-  { id: 'tab-prodcomm', label: 'Product Commission', icon: '🧴', badge: (p) => p.productCommReport.codeRequests.filter((r) => r.status === 'pending').length },
+  { id: 'tab-unilevel', label: 'Unilevel', icon: '📶' },
+  { id: 'tab-prodcomm', label: 'Product Commission', icon: '🧴' },
   { id: 'tab-tree', label: 'Genealogy Viewer', icon: '🌳' },
   { id: 'tab-logs', label: 'Activity Logs', icon: '📜' },
   { id: 'tab-settings', label: 'Comp. Plan', icon: '⚙️' },
@@ -801,14 +801,16 @@ function ProductOrdersTab(props: AdminProps & { post: PostFn; busy: boolean }) {
   const { pendingProdOrders, activationHistory, post, busy } = props;
   const { selected, setSelected, all } = useSelection(pendingProdOrders.map((o) => Number(o.id)));
   const [transferTarget, setTransferTarget] = React.useState('');
-  const [singleTransfer, setSingleTransfer] = React.useState<(OrderRow & { username: string }) | null>(null);
+  const [codeTypes, setCodeTypes] = React.useState<Record<string, string>>({});
+  const defaultCodeType = (rank: string) => (/starter/i.test((rank || '').replace(/\s+/g, '')) ? 'PCC' : 'UNI');
+  const [singleTransfer, setSingleTransfer] = React.useState<(OrderRow & { username: string; rank: string }) | null>(null);
   const [singleTarget, setSingleTarget] = React.useState('');
 
   return (
     <div className="animate-fadeIn space-y-4">
       <div className="card">
         <h3 className="text-[16px] font-bold text-violet-400">🛒 Pending Product Orders</h3>
-        <p className="mt-1 text-[12px] text-zinc-500">Approve, activate, or transfer product orders. <strong>Activate</strong> = approve + generate code + mark as used + trigger commissions instantly.</p>
+        <p className="mt-1 text-[12px] text-zinc-500">Approve, activate, or transfer product orders. <strong>Approve</strong> sends codes to the member&apos;s LP Vault — you decide the type (Unilevel or Product) per order; the dropdown is pre-picked by the buyer&apos;s rank (Starter \u2192 Product, Premium/StarPremium \u2192 Unilevel). <strong>Activate</strong> = approve + generate code + mark as used + trigger commissions instantly.</p>
 
         {pendingProdOrders.length > 0 && (
           <div className="mt-3 rounded-lg border border-violet-700 bg-violet-950/20 p-3">
@@ -820,7 +822,7 @@ function ProductOrdersTab(props: AdminProps & { post: PostFn; busy: boolean }) {
               <button type="button" disabled={busy || !selected.length} className="btn btn-sm !bg-emerald-700 text-white hover:!bg-emerald-600 disabled:opacity-40" onClick={async () => { if (confirmDialog('Activate selected orders? Codes will be generated, marked as used, and commissions distributed immediately.')) await post({ action: 'orders-batch', mode: 'activate', order_ids: selected }); }}>
                 ⚡ Activate
               </button>
-              <button type="button" disabled={busy || !selected.length} className="btn-dark btn-sm" onClick={async () => { if (confirmDialog('Approve selected? Codes generated as UNUSED — commissions NOT triggered.')) await post({ action: 'orders-batch', mode: 'approve', order_ids: selected }); }}>
+              <button type="button" disabled={busy || !selected.length} className="btn-dark btn-sm" onClick={async () => { if (confirmDialog('Approve selected? Codes are sent as UNUSED (type by buyer rank: Starter \u2192 Product, Premium/StarPremium \u2192 Unilevel) — commissions NOT triggered until activation.')) await post({ action: 'orders-batch', mode: 'approve', order_ids: selected }); }}>
                 ✓ Approve
               </button>
               <button type="button" disabled={busy || !selected.length} className="btn-danger btn-sm disabled:opacity-40" onClick={async () => { if (confirmDialog('Reject selected orders?')) await post({ action: 'orders-batch', mode: 'reject', order_ids: selected }); }}>
@@ -839,18 +841,23 @@ function ProductOrdersTab(props: AdminProps & { post: PostFn; busy: boolean }) {
 
         <div className="tbl-wrap mt-3">
           <table className="tbl">
-            <thead><tr><th>Select</th><th>Date</th><th>Member</th><th>Order Details</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Select</th><th>Date</th><th>Member</th><th>Rank</th><th>Order Details</th><th>Actions</th></tr></thead>
             <tbody>
-              {pendingProdOrders.length === 0 && <tr><td colSpan={5} className="text-center text-zinc-500">No pending product orders.</td></tr>}
+              {pendingProdOrders.length === 0 && <tr><td colSpan={6} className="text-center text-zinc-500">No pending product orders.</td></tr>}
               {pendingProdOrders.map((o) => (
                 <tr key={String(o.id)}>
                   <td><input type="checkbox" className="check" checked={selected.includes(Number(o.id))} onChange={(e) => setSelected((s) => (e.target.checked ? [...s, Number(o.id)] : s.filter((x) => x !== Number(o.id))))} /></td>
                   <td className="text-zinc-500">{dt(o.created_at, 'm/d/Y H:i')}</td>
                   <td className="font-bold text-violet-300">@{o.username}</td>
+                  <td><span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] font-bold text-amber-300">{o.rank || '-'}</span></td>
                   <td className="!whitespace-normal text-violet-200">{o.order_details}</td>
                   <td>
                     <div className="flex flex-wrap gap-1">
-                      <button type="button" disabled={busy} className="btn-dark btn-xs" onClick={async () => { if (confirmDialog('Approve this order? Codes generated as unused; member activates from vault.')) await post({ action: 'order-single', mode: 'approve', order_id: o.id }); }}>✓ Approve</button>
+                      <select className="select !w-[138px] !py-1 !text-[12px]" value={codeTypes[String(o.id)] ?? defaultCodeType(o.rank)} onChange={(e) => setCodeTypes((m) => ({ ...m, [String(o.id)]: e.target.value }))}>
+                        <option value="UNI">Unilevel Codes</option>
+                        <option value="PCC">Product Codes</option>
+                      </select>
+                      <button type="button" disabled={busy} className="btn-dark btn-xs" onClick={async () => { if (confirmDialog('Approve this order? The selected code type is sent to the member LP Vault as unused; commissions fire when the member activates.')) await post({ action: 'order-single', mode: 'approve', order_id: o.id, code_type: codeTypes[String(o.id)] ?? defaultCodeType(o.rank) }); }}>✓ Approve</button>
                       <button type="button" disabled={busy} className="btn btn-xs !bg-emerald-700 text-white hover:!bg-emerald-600" onClick={async () => { if (confirmDialog('Activate this order? Code will be generated, marked as used, and commissions distributed immediately.')) await post({ action: 'order-single', mode: 'activate', order_id: o.id }); }}>⚡ Activate</button>
                       <button type="button" className="btn-dark btn-xs" onClick={() => { setSingleTransfer(o); setSingleTarget(''); }}>🔀 Transfer</button>
                       <button type="button" disabled={busy} className="btn-danger btn-xs" onClick={async () => { if (confirmDialog('Reject this order?')) await post({ action: 'order-single', mode: 'reject', order_id: o.id }); }}>✗ Reject</button>
@@ -1187,49 +1194,6 @@ function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post
         </div>
       </div>
 
-      <div className="card" style={{ borderColor: '#065f46' }}>
-        <h3 className="text-[15px] font-bold text-emerald-400">🧾 Unilevel Code Requests</h3>
-        {report.codeRequests.filter((r) => r.status === 'pending').length === 0 && (
-          <p className="mt-3 text-[13px] text-zinc-500">No pending requests.</p>
-        )}
-        <div className="mt-2 space-y-2">
-          {report.codeRequests.filter((r) => r.status === 'pending').map((r) => (
-            <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-[#0a0a0a] px-3 py-2">
-              <div className="text-[13px]">
-                <strong className="text-zinc-100">@{r.username}</strong>{' '}
-                <span className="text-zinc-400">{String(r.order_details || '').replace(/^UNILEVEL CODE REQUEST:\s*/i, '')}</span>{' '}
-                <span className="text-zinc-600">· {dt(r.created_at)}</span>
-              </div>
-              <div className="flex gap-2">
-                <button type="button" disabled={busy} className="btn !bg-emerald-700 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-emerald-600 disabled:opacity-40" onClick={async () => { await post({ action: 'unilevel-code-approve', order_id: r.id }); }}>
-                  ✓ Approve &amp; Issue Codes
-                </button>
-                <button type="button" disabled={busy} className="btn !bg-red-900 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-red-800 disabled:opacity-40" onClick={async () => { await post({ action: 'unilevel-code-reject', order_id: r.id }); }}>
-                  ✕ Reject
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        {report.codeRequests.filter((r) => r.status !== 'pending').length > 0 && (
-          <div className="tbl-wrap mt-3">
-            <table className="tbl">
-              <thead><tr><th>Date</th><th>Member</th><th>Request</th><th>Status</th></tr></thead>
-              <tbody>
-                {report.codeRequests.filter((r) => r.status !== 'pending').map((r) => (
-                  <tr key={r.id}>
-                    <td className="text-zinc-500">{dt(r.created_at)}</td>
-                    <td>@{r.username}</td>
-                    <td className="!whitespace-normal">{String(r.order_details || '').replace(/^UNILEVEL CODE REQUEST:\s*/i, '')}</td>
-                    <td>{r.status === 'approved' ? <span className="font-semibold text-emerald-400">✓ Approved</span> : <span className="font-semibold text-red-400">✕ Rejected</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
       <div className="card">
         <h3 className="text-[15px] font-bold text-emerald-400">Per-Member Unilevel Earnings</h3>
         <div className="tbl-wrap mt-2">
@@ -1287,49 +1251,6 @@ function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport
         <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(r.pending)}</span>} />
         <Stat label="Starter Bottles Credited" value={String(r.bottles)} sub={`At ${peso(r.perBottle)} per bottle`} />
         <Stat label="Members Earning" value={String(r.earners)} />
-      </div>
-
-      <div className="card" style={{ borderColor: '#0e7490' }}>
-        <h3 className="text-[15px] font-bold text-cyan-300">🧾 Product Code Requests</h3>
-        {report.codeRequests.filter((r) => r.status === 'pending').length === 0 && (
-          <p className="mt-3 text-[13px] text-zinc-500">No pending requests.</p>
-        )}
-        <div className="mt-2 space-y-2">
-          {report.codeRequests.filter((r) => r.status === 'pending').map((r) => (
-            <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-[#0a0a0a] px-3 py-2">
-              <div className="text-[13px]">
-                <strong className="text-zinc-100">@{r.username}</strong>{' '}
-                <span className="text-zinc-400">{String(r.order_details || '').replace(/^CODE REQUEST:\s*/i, '')}</span>{' '}
-                <span className="text-zinc-600">· {dt(r.created_at)}</span>
-              </div>
-              <div className="flex gap-2">
-                <button type="button" disabled={busy} className="btn !bg-emerald-700 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-emerald-600 disabled:opacity-40" onClick={async () => { await post({ action: 'code-request-approve', order_id: r.id }); }}>
-                  ✓ Approve &amp; Issue Codes
-                </button>
-                <button type="button" disabled={busy} className="btn !bg-red-900 px-3 py-1.5 text-[12px] font-bold text-white hover:!bg-red-800 disabled:opacity-40" onClick={async () => { await post({ action: 'code-request-reject', order_id: r.id }); }}>
-                  ✕ Reject
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        {report.codeRequests.filter((r) => r.status !== 'pending').length > 0 && (
-          <div className="tbl-wrap mt-3">
-            <table className="tbl">
-              <thead><tr><th>Date</th><th>Member</th><th>Request</th><th>Status</th></tr></thead>
-              <tbody>
-                {report.codeRequests.filter((r) => r.status !== 'pending').map((r) => (
-                  <tr key={r.id}>
-                    <td className="text-zinc-500">{dt(r.created_at)}</td>
-                    <td>@{r.username}</td>
-                    <td className="!whitespace-normal">{String(r.order_details || '').replace(/^CODE REQUEST:\s*/i, '')}</td>
-                    <td>{r.status === 'approved' ? <span className="font-semibold text-emerald-400">✓ Approved</span> : <span className="font-semibold text-red-400">✕ Rejected</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       <div className="card">

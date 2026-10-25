@@ -233,12 +233,16 @@ export async function POST(req: Request) {
     if (action === 'order-single') {
       const id = Number(b.order_id);
       if (b.mode === 'approve') {
-        const r = await approveOrder(id, actorRef);
+        const r = await approveOrder(id, actorRef, {
+          codeType: b.code_type === 'PCC' ? 'PCC' : b.code_type === 'UNI' ? 'UNI' : undefined,
+        });
         return r.ok
           ? ok({
               message: (r.activated ?? 0) > 0
-                ? `Order #${id} approved. ${r.activated} code(s) auto-activated (Product Commission Activation — Starter LP purchase).`
-                : `Order #${id} approved. ${r.generated ?? 0} code(s) generated as unused.`,
+                ? `Order #${id} approved. ${r.activated} code(s) activated instantly.`
+                : r.series
+                  ? `Order #${id} approved. ${r.generated ?? 0} ${r.series === 'UNI' ? 'Unilevel (UNI)' : 'Product (PCC)'} code(s) sent to the member's LP Vault as unused.`
+                  : `Order #${id} approved. ${r.generated ?? 0} code(s) generated as unused.`,
             })
           : fail(r.error!);
       }
@@ -255,35 +259,6 @@ export async function POST(req: Request) {
         return r.ok ? ok({ message: `Order #${id} transferred to @${String(b.target)}.` }) : fail(r.error!);
       }
       return fail('Unknown order mode.');
-    }
-
-    /* ------------- code requests (Product Commission + Unilevel) ------------- */
-    if (
-      action === 'code-request-approve' || action === 'code-request-reject' ||
-      action === 'unilevel-code-approve' || action === 'unilevel-code-reject'
-    ) {
-      const isUni = action.startsWith('unilevel');
-      const marker = isUni ? 'UNILEVEL CODE REQUEST:' : 'CODE REQUEST:';
-      const label = isUni ? 'Unilevel Code' : 'Product Code';
-      const orderId = Number(b.order_id ?? 0);
-      const order = await one<OrderRow>('SELECT * FROM orders WHERE id=$1', [orderId]);
-      if (!order || !(order.order_details || '').startsWith(marker)) return fail('Code request not found.');
-      if (order.status !== 'pending') return fail('This request was already processed.');
-      if (action.endsWith('reject')) {
-        await exec(`UPDATE orders SET status='rejected' WHERE id=$1`, [orderId]);
-        await audit(actor, 'orders', `REJECT ${isUni ? 'UNILEVEL' : 'PRODUCT'} CODE REQUEST`, { orderId });
-        return ok({ message: `${label} request rejected.` });
-      }
-      const m = /CODE REQUEST:\s*(\d+)x\s*(.+)$/i.exec(order.order_details || '');
-      if (!m) return fail('Could not read this code request.');
-      const qty = Math.max(1, Number(m[1]));
-      const pkg = await one<PackageRow>('SELECT * FROM packages WHERE pkg_name=$1 AND is_product=1 AND status=1', [m[2].trim()]);
-      if (!pkg) return fail('That product is no longer available.');
-      // Separate visible code series per flow: UNI-... vs PCC-...
-      for (let i = 0; i < qty; i++) await generatePinRow(pkg.pkg_name, true, Number(order.user_id), isUni ? 'UNI' : 'PCC');
-      await exec(`UPDATE orders SET status='approved' WHERE id=$1`, [orderId]);
-      await audit(actor, 'orders', `APPROVE ${isUni ? 'UNILEVEL' : 'PRODUCT'} CODE REQUEST`, { orderId, qty, pkg: pkg.pkg_name });
-      return ok({ message: `${qty} ${label}(s) for ${pkg.pkg_name} were issued to the member's My Products vault (${isUni ? 'UNI' : 'PCC'} series).` });
     }
 
     /* ---------------- encashment ---------------- */

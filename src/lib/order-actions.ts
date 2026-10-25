@@ -43,8 +43,8 @@ export async function generatePinRow(packageType: string, isProduct: boolean, pu
 export async function approveOrder(
   orderId: number,
   actor: OrderActor,
-  opts: { activate?: boolean } = {},
-): Promise<{ ok: boolean; error?: string; generated?: number; activated?: number }> {
+  opts: { activate?: boolean; codeType?: 'UNI' | 'PCC' } = {},
+): Promise<{ ok: boolean; error?: string; generated?: number; activated?: number; series?: string }> {
   const order = await one<OrderRow>('SELECT * FROM orders WHERE id = $1', [Number(orderId)]);
   if (!order) return { ok: false, error: 'Order not found.' };
   if (order.status !== 'pending') return { ok: false, error: 'Order was already processed.' };
@@ -76,17 +76,25 @@ export async function approveOrder(
   const pkg: PackageRow | undefined = byName.get(pkgName);
   const isProduct = !!pkg && Number(pkg.is_product) === 1;
 
-  // Starter LP purchases go DIRECTLY to Product Commission Activation:
-  // on approval the codes are activated immediately (the sponsor's Product
-  // Commission posts as Floating, the buyer receives the LP credit).
+  // LP purchases: the admin decides which code series the member receives.
+  // Unilevel (UNI) or Product (PCC) codes land UNUSED in the member's LP
+  // Vault; commissions fire only when the member activates them. When the
+  // admin does not choose, the default follows the buyer's rank: Starter ->
+  // Product (PCC), Premium/StarPremium -> Unilevel (UNI). The Product
+  // Commission rule applies on activation (a Starter activating a code
+  // credits their qualified Premium/StarPremium sponsor per bottle, FLOATING).
+  // opts.activate stays an explicit admin "approve + activate now" action.
   const buyer = isProduct ? await userById(Number(order.user_id)) : null;
-  const autoActivate = isProduct && (opts.activate === true || isStarterRank(buyer?.rank ?? ''));
+  const autoActivate = isProduct && opts.activate === true;
+  const series = isProduct && !autoActivate
+    ? (opts.codeType ?? (isStarterRank(buyer?.rank ?? '') ? 'PCC' : 'UNI'))
+    : '';
 
   await exec(`UPDATE orders SET status='approved' WHERE id = $1`, [order.id]);
   let generated = 0;
   let activated = 0;
   for (let i = 0; i < qty; i++) {
-    const pinId = await generatePinRow(pkgName, isProduct, Number(order.user_id));
+    const pinId = await generatePinRow(pkgName, isProduct, Number(order.user_id), series);
     generated++;
     // Other product pins stay 'unused' on plain approval: the member
     // activates from My Products and only then are commissions distributed.
@@ -99,9 +107,9 @@ export async function approveOrder(
   await auditLog({
     actorUserId: actor.id, actorUsername: actor.username, actorRole: 'admin',
     category: 'orders', action: autoActivate ? 'APPROVE + ACTIVATE ORDER' : 'APPROVE ORDER',
-    targetUserId: Number(order.user_id), details: { orderId: order.id, qty, pkgName, isProduct, generated, activated },
+    targetUserId: Number(order.user_id), details: { orderId: order.id, qty, pkgName, isProduct, generated, activated, series: series || null },
   });
-  return { ok: true, generated, activated };
+  return { ok: true, generated, activated, series };
 }
 
 export async function rejectOrder(orderId: number, actor: OrderActor): Promise<{ ok: boolean; error?: string }> {

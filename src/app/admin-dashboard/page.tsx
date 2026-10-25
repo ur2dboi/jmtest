@@ -118,9 +118,12 @@ export default async function AdminDashboardPage({
 
   // Pending orders split
   const pendingOrders = await q<OrderRow>(`SELECT * FROM orders WHERE status='pending' ORDER BY id ASC`);
-  const withUser = async (o: OrderRow) => ({ ...o, username: (await userById(Number(o.user_id)))?.username ?? 'Unknown' });
-  const pendingPkgOrders: (OrderRow & { username: string })[] = [];
-  const pendingProdOrders: (OrderRow & { username: string })[] = [];
+  const withUser = async (o: OrderRow) => {
+    const ou = await userById(Number(o.user_id));
+    return { ...o, username: ou?.username ?? 'Unknown', rank: ou?.rank ?? '' };
+  };
+  const pendingPkgOrders: (OrderRow & { username: string; rank: string })[] = [];
+  const pendingProdOrders: (OrderRow & { username: string; rank: string })[] = [];
   for (const o of pendingOrders) {
     (orderIsProduct(o.order_details, byName) ? pendingProdOrders : pendingPkgOrders).push(await withUser(o));
   }

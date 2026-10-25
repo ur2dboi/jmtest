@@ -519,15 +519,11 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
 }
 
 /* ==================== UNILEVEL & PRODUCT COMMISSION ==================== */
-function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; busy: boolean }) {
+function UnilevelTab({ data }: MemberPortalProps) {
   const earn = data.earnings;
   const d = data.unilevelDetail;
   const pc = data.productCommDetail;
   const lpNeeded = Math.max(0, 5 - data.lp);
-  const [uniProduct, setUniProduct] = React.useState(0);
-  const [uniQty, setUniQty] = React.useState(1);
-  const [pcProduct, setPcProduct] = React.useState(0);
-  const [pcQty, setPcQty] = React.useState(1);
   // Regular (Mother) Starter accounts access Product Commission only;
   // Unilevel sections unlock when they upgrade to Premium/StarPremium.
   const isStarter = /starter/i.test((data.user.rank || '').replace(/\s+/g, ''));
@@ -574,116 +570,6 @@ function UnilevelTab({ data, post, busy }: MemberPortalProps & { post: PostFn; b
                     <td>Level {l.level}</td>
                     <td>{l.count}</td>
                     <td className="font-bold text-emerald-400">{peso(l.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <div className={`grid grid-cols-1 gap-4 ${isStarter ? '' : 'lg:grid-cols-2'}`}>
-        {!isStarter && (
-        <div className="card" style={{ borderColor: '#065f46' }}>
-          <h3 className="text-[16px] font-bold text-emerald-400">🧾 Request Unilevel Codes</h3>
-          <form
-            className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              await post({ action: 'request-unilevel-codes', item_id: uniProduct, qty: uniQty });
-              setUniQty(1);
-            }}
-          >
-            <div>
-              <span className="lbl">Product</span>
-              <select className="select" value={uniProduct} onChange={(e) => setUniProduct(Number(e.target.value))}>
-                <option value={0}>-- Choose Product --</option>
-                {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
-              </select>
-            </div>
-            <div>
-              <span className="lbl">Quantity (codes)</span>
-              <input type="number" min={1} max={50} className="input" value={uniQty} onChange={(e) => setUniQty(Math.max(1, Number(e.target.value) || 1))} />
-            </div>
-            <div className="flex items-end">
-              <button type="submit" disabled={busy || !uniProduct} className="btn w-full !bg-emerald-700 font-bold text-white hover:!bg-emerald-600 disabled:opacity-40 sm:w-auto">
-                Request Codes
-              </button>
-            </div>
-          </form>
-        </div>
-
-        )}
-        <div className="card" style={{ borderColor: '#0e7490' }}>
-          <h3 className="text-[16px] font-bold text-cyan-300">🧾 Request Product Codes</h3>
-          <form
-            className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_130px_auto]"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              await post({ action: 'request-product-codes', item_id: pcProduct, qty: pcQty });
-              setPcQty(1);
-            }}
-          >
-            <div>
-              <span className="lbl">Product</span>
-              <select className="select" value={pcProduct} onChange={(e) => setPcProduct(Number(e.target.value))}>
-                <option value={0}>-- Choose Product --</option>
-                {data.products.map((p) => <option key={p.id} value={p.id}>{p.pkg_name} — {peso(p.pkg_price)}</option>)}
-              </select>
-            </div>
-            <div>
-              <span className="lbl">Quantity (codes)</span>
-              <input type="number" min={1} max={50} className="input" value={pcQty} onChange={(e) => setPcQty(Math.max(1, Number(e.target.value) || 1))} />
-            </div>
-            <div className="flex items-end">
-              <button type="submit" disabled={busy || !pcProduct} className="btn w-full !bg-cyan-700 font-bold text-white hover:!bg-cyan-600 disabled:opacity-40 sm:w-auto">
-                Request Codes
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      {!isStarter && data.unilevelCodeRequests.length > 0 && (
-        <div className="card">
-          <h3 className="text-[15px] font-bold text-emerald-400">My Unilevel Code Requests</h3>
-          <div className="tbl-wrap mt-2">
-            <table className="tbl">
-              <thead><tr><th>Date Requested</th><th>Request</th><th>Status</th></tr></thead>
-              <tbody>
-                {data.unilevelCodeRequests.map((o) => (
-                  <tr key={o.id}>
-                    <td className="text-zinc-500">{dt(o.created_at)}</td>
-                    <td className="!whitespace-normal">{String(o.order_details || '').replace(/^UNILEVEL CODE REQUEST:\s*/i, '')}</td>
-                    <td>
-                      {o.status === 'pending' && <span className="font-semibold text-amber-300">⏳ Pending Admin Review</span>}
-                      {o.status === 'approved' && <span className="font-semibold text-emerald-400">✓ Approved — codes in My Products</span>}
-                      {o.status === 'rejected' && <span className="font-semibold text-red-400">✕ Rejected</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {data.codeRequests.length > 0 && (
-        <div className="card">
-          <h3 className="text-[15px] font-bold text-cyan-300">My Product Code Requests</h3>
-          <div className="tbl-wrap mt-2">
-            <table className="tbl">
-              <thead><tr><th>Date Requested</th><th>Request</th><th>Status</th></tr></thead>
-              <tbody>
-                {data.codeRequests.map((o) => (
-                  <tr key={o.id}>
-                    <td className="text-zinc-500">{dt(o.created_at)}</td>
-                    <td className="!whitespace-normal">{String(o.order_details || '').replace(/^CODE REQUEST:\s*/i, '')}</td>
-                    <td>
-                      {o.status === 'pending' && <span className="font-semibold text-amber-300">⏳ Pending Admin Review</span>}
-                      {o.status === 'approved' && <span className="font-semibold text-emerald-400">✓ Approved — codes in My Products</span>}
-                      {o.status === 'rejected' && <span className="font-semibold text-red-400">✕ Rejected</span>}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1118,7 +1004,7 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
       {!data.isChildLogin && (
         <>
           <h3 className="pt-2 text-[16px] font-bold text-gold">{isStarterRankLocal ? '💰 Product Commission' : '📶 Unilevel & Product Commission'}</h3>
-          <UnilevelTab {...props} post={post} busy={busy} />
+          <UnilevelTab {...props} />
         </>
       )}
 
