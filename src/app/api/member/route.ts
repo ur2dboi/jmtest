@@ -209,8 +209,12 @@ export async function POST(req: Request) {
 
     /* ---------------- orders ---------------- */
     if (action === 'order') {
-      if (loggedInAsChild) return fail('Child Accounts are not permitted to make purchases.');
       const type = String(b.type ?? 'package');
+      // Child Accounts may purchase PACKAGES only (to upgrade their own
+      // node); product/LP purchases stay with the Mother Account.
+      if (loggedInAsChild && type !== 'package') {
+        return fail('Child Accounts may only purchase packages for account upgrade. Product purchases are done via the Mother Account.');
+      }
       const itemId = Number(b.item_id ?? 0);
       const qty = Math.max(1, Number(b.qty ?? 1));
       const mop = String(b.payment_method ?? 'Cash (Walk-in)');

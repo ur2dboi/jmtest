@@ -66,8 +66,7 @@ export default function MemberPortal(props: MemberPortalProps) {
 
   // Starter Child Accounts cannot access Purchasing (commissions stay Mother-only).
   const activeRankNorm = ((data.activeAccount?.rank_snapshot || user.rank || '') as string).replace(/\s+/g, '').toLowerCase();
-  const isStarterChild = isChild && activeRankNorm.includes('starter');
-  const visibleTabs = TABS.filter((t) => !(isChild && t.hideForChild) && !(isStarterChild && t.id === 'mtab-purchasing'));
+  const visibleTabs = TABS.filter((t) => !(isChild && t.hideForChild));
 
   async function post(payload: Record<string, unknown>, successMsg?: string) {
     setBusy(true);
@@ -180,7 +179,7 @@ export default function MemberPortal(props: MemberPortalProps) {
         {tab === 'mtab-reports' && <ReportsTab data={data} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
-        {tab === 'mtab-purchasing' && !isStarterChild && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
+        {tab === 'mtab-purchasing' && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
         {tab === 'mtab-product-vault' && !isChild && <ProductVaultTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-associates' && !isChild && <AssociatesTab associates={props.associates} />}
         {tab === 'mtab-profile' && <ProfileTab {...props} post={post} busy={busy} />}
@@ -203,10 +202,12 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
         <Stat label="Encashment" value={peso(earn.totalEncashed)} sub="Withdrawals from available commission" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Stat label="FLOATING Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
-        <Stat label="FLOATING Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
-      </div>
+      {!(data.isChildLogin || data.activeAccount.account_type === 'CA') && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Stat label="FLOATING Unilevel Commission (LP)" value={<span className="text-amber-300">{peso(earn.unilevelPendingCutoff)}</span>} />
+          <Stat label="FLOATING Product Commission (PC)" value={<span className="text-amber-300">{peso(earn.productCommPending)}</span>} />
+        </div>
+      )}
 
       {!data.isChildLogin && caSlotsOpen > 0 && (
         <div className="card" style={{ borderColor: '#3b82f6' }}>
@@ -891,10 +892,12 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
   const orders = data.orders.filter((o) => !/^(UNILEVEL )?CODE REQUEST:/i.test(o.order_details || ''));
   const rankNormLocal = (data.user.rank || '').replace(/\s+/g, '').toLowerCase();
   const isStarterRankLocal = rankNormLocal.includes('starter');
+  const childMode = data.isChildLogin;
 
   return (
     <div className="animate-fadeIn space-y-4">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+{!childMode && (
         <div className="card" style={{ borderColor: '#5b21b6' }}>
           <h3 className="text-[15px] font-bold text-violet-400">🛒 LP (Retail)</h3>
           <form
@@ -917,6 +920,7 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
             <button type="submit" disabled={busy || !lpItem} className="btn-gold w-full disabled:opacity-40">SUBMIT ORDER</button>
           </form>
         </div>
+      )}
 
         <div className="card">
           <h3 className="text-[15px] font-bold text-gold">📦 Packages</h3>
@@ -941,6 +945,7 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
           </form>
         </div>
 
+{!childMode && (
         <div className="card" style={{ borderColor: '#5b21b6' }}>
           <h3 className="text-[15px] font-bold text-violet-400">🔑 LP Vault</h3>
           <div className="mt-3 rounded-lg border border-line bg-[#0a0a0a] px-3 py-3 text-center">
@@ -978,6 +983,7 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
             </table>
           </div>
         </div>
+      )}
 
         <div className="card" style={{ borderColor: '#8a6d1f' }}>
           <h3 className="text-[15px] font-bold text-gold">🔑 Package Vault</h3>
@@ -1008,6 +1014,7 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
         </>
       )}
 
+{!childMode && (
       <div className="card">
         <h3 className="text-[15px] font-bold text-emerald-400">⚡ Admin Activation History</h3>
         <div className="tbl-wrap mt-3">
@@ -1027,6 +1034,7 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
           </table>
         </div>
       </div>
+      )}
 
       <div className="card">
         <h3 className="text-[15px] font-bold text-zinc-100">🧾 Purchase History</h3>
@@ -1371,8 +1379,10 @@ function ProfileTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) 
             <strong className="text-violet-300">{peso(earn.pairingReleased + earn.tri)} <small className="font-normal">({data.activeAccount.pairing_count} tri-leg triggers / {earn.gc} GC)</small></strong>
           </div>
           <div className="flex justify-between"><span>Unilevel Commission</span><strong>{peso(earn.unilevel)}</strong></div>
+          {data.activeAccount.account_type !== 'CA' && (<>
           <div className="flex justify-between text-amber-300"><span>FLOATING Unilevel Commission (LP)</span><strong>{peso(earn.unilevelPendingCutoff)}</strong></div>
           <div className="flex justify-between text-amber-300"><span>FLOATING Product Commission (PC)</span><strong>{peso(earn.productCommPending)}</strong></div>
+          </>)}
           <div className="flex justify-between"><span>Available GC</span><strong className="text-sky-400">{earn.gc}</strong></div>
           <div className="flex justify-between border-t border-dashed border-line pt-2 font-bold"><span>TOTAL EARNINGS</span><strong className="text-gold">{peso(earn.totalEarned)}</strong></div>
           <div className="flex justify-between"><span>Total Encashed</span><strong className="text-red-400">-{peso(earn.totalEncashed)}</strong></div>
