@@ -60,6 +60,8 @@ export default function MemberPortal(props: MemberPortalProps) {
   const earn = data.earnings;
   const isChild = data.isChildLogin;
   const [tab, setTab] = React.useState(props.initialTab || 'mtab-overview');
+  const [reportFilter, setReportFilter] = React.useState<ReportFilter>('All');
+  function openReport(filter: ReportFilter) { setReportFilter(filter); setTab('mtab-reports'); }
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [toast, setToast] = useToast();
   const [busy, setBusy] = React.useState(false);
@@ -168,15 +170,15 @@ export default function MemberPortal(props: MemberPortalProps) {
 
         {isChild && (
           <div className="mb-4 rounded-lg border border-red-800 bg-red-950/50 px-4 py-3 text-center text-[13px] font-semibold text-red-300">
-            🔒 CHILD ACCOUNT ACTIVE: This node is exclusively for network pairing and encashment. Direct referrals, purchasing, and profile management must be executed via your Mother Account — but you may upgrade this Child Account's package under Profile ⬆️.
+            🔒 CHILD ACCOUNT ACTIVE: This node is exclusively for network pairing and encashment. Direct referrals, product purchases, and profile management are handled by your Mother Account. You may purchase a package and upgrade this Child Account under Profile ⬆️.
           </div>
         )}
 
         {tab === 'mtab-overview' && (
-          <OverviewTab {...props} post={post} busy={busy} setTab={setTab} caSlotsOpen={props.caSlotsOpen} />
+          <OverviewTab {...props} post={post} busy={busy} setTab={setTab} openReport={openReport} caSlotsOpen={props.caSlotsOpen} />
         )}
         {tab === 'mtab-transactions' && <TransactionsTab data={data} />}
-        {tab === 'mtab-reports' && <ReportsTab data={data} />}
+        {tab === 'mtab-reports' && <ReportsTab data={data} filter={reportFilter} setFilter={setReportFilter} />}
         {tab === 'mtab-tree' && <TreeTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-encash' && <EncashTab {...props} post={post} busy={busy} />}
         {tab === 'mtab-purchasing' && <PurchasingTab {...props} post={post} busy={busy} setTab={setTab} />}
@@ -191,7 +193,7 @@ export default function MemberPortal(props: MemberPortalProps) {
 type PostFn = (payload: Record<string, unknown>, successMsg?: string) => Promise<{ message?: string }>;
 
 /* ============================ OVERVIEW ============================ */
-function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProps & { post: PostFn; busy: boolean; setTab: (t: string) => void; caSlotsOpen: number }) {
+function OverviewTab({ data, post, busy, setTab, openReport, caSlotsOpen }: MemberPortalProps & { post: PostFn; busy: boolean; setTab: (t: string) => void; openReport: (filter: ReportFilter) => void; caSlotsOpen: number }) {
   const earn = data.earnings;
   const [caOpen, setCaOpen] = React.useState(false);
   return (
@@ -222,11 +224,11 @@ function OverviewTab({ data, post, busy, setTab, caSlotsOpen }: MemberPortalProp
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card">
           <h3 className="panel-title !text-gold">Summary of Earnings</h3>
-          <SummaryRow label="Direct Referral Bonus" value={peso(earn.dr)} onClick={() => setTab('mtab-reports')} />
+          <SummaryRow label="Direct Referral Bonus" value={peso(earn.dr)} onClick={() => openReport('Direct Referral')} />
           <SummaryRow label="A+B Pairing Bonus" value={peso(earn.pairingReleased)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Tri-Leg Bonus" value={peso(earn.tri)} onClick={() => setTab('mtab-reports')} />
           <SummaryRow label="Unilevel Comm" value={peso(earn.unilevel)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-purchasing')} />
-          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => setTab(data.isChildLogin ? 'mtab-reports' : 'mtab-purchasing')} />
+          <SummaryRow label="Product Comm (Starter Direct)" value={peso(earn.productComm)} onClick={() => openReport('Product Commission')} />
           <div className="flex items-center justify-between py-1 text-[13px]">
             <span className="text-emerald-400">Available GC</span><strong className="text-emerald-400">{earn.gc}</strong>
           </div>
@@ -448,6 +450,7 @@ function TransactionsTab({ data }: { data: MemberPortalData }) {
 
 /* ============================ REPORTS ============================ */
 const REPORT_FILTERS = ['All', 'Direct Referral', 'Pairing', 'Trifinity Pair', 'Unilevel', 'Product Commission', 'FLOATING Commission (LP)', 'GC', 'Flush'] as const;
+type ReportFilter = (typeof REPORT_FILTERS)[number];
 const FILTER_TERMS: Record<string, string[]> = {
   Pairing: ['a+b', 'pairing bonus'],
   'Trifinity Pair': ['tri-leg'],
@@ -458,8 +461,7 @@ const FILTER_TERMS: Record<string, string[]> = {
   Flush: ['flush out', 'exceeded daily limit'],
 };
 
-function ReportsTab({ data }: { data: MemberPortalData }) {
-  const [filter, setFilter] = React.useState<(typeof REPORT_FILTERS)[number]>('All');
+function ReportsTab({ data, filter, setFilter }: { data: MemberPortalData; filter: ReportFilter; setFilter: (filter: ReportFilter) => void }) {
   const rows = data.ledger;
   const matched = rows.filter((l) => {
     if (filter === 'All') return true;
@@ -483,7 +485,7 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
     <div className="card animate-fadeIn">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
         <h3 className="text-[16px] font-bold text-gold">📈 Income Report: {filter}</h3>
-        <select className="select !w-auto" value={filter} onChange={(e) => setFilter(e.target.value as never)}>
+        <select className="select !w-auto" value={filter} onChange={(e) => setFilter(e.target.value as ReportFilter)}>
           {REPORT_FILTERS.map((f) => (
             <option key={f} value={f}>{f === 'All' ? 'All Earnings' : f === 'Pairing' ? 'A+B Pairing Bonus' : f === 'Trifinity Pair' ? 'Trifinity Pair' : f === 'Unilevel' ? 'Unilevel Comm' : f === 'Product Commission' ? 'Product Commission' : f === 'FLOATING Commission (LP)' ? 'FLOATING Commission (LP)' : f === 'GC' ? 'Available GC' : f === 'Flush' ? 'Daily Limit' : 'Direct Referral Bonus'}</option>
           ))}
@@ -499,7 +501,7 @@ function ReportsTab({ data }: { data: MemberPortalData }) {
               return (
                 <tr key={l.id}>
                   <td className="text-zinc-500">{dt(l.created_at)}</td>
-                  <td className="!whitespace-normal">{l.note}</td>
+                  <td className="!whitespace-normal">{l.note}{l.status === 'hang' && <span className="ml-2 text-amber-300">(Floating; not yet released)</span>}</td>
                   <td style={{ color: isFlush ? '#ef4444' : '#10b981', fontWeight: 700 }}>
                     {isFlush ? 'FLUSHED / LIMIT EXCEEDED' : l.status === 'forfeited' ? 'FORFEITED / NO MAINTENANCE' : l.type === 'gc' ? `${Math.trunc(Number(l.amount))} GC` : `+${peso(l.amount)}`}
                   </td>
