@@ -584,23 +584,22 @@ export async function upgradeRank(
   await exec('UPDATE users SET rank = $1 WHERE id = $2', [to, Number(userId)]);
   invalidateUser(Number(userId)); // portal must show the new rank immediately after reload
   await addRankHistory(Number(userId), from, to);
-  const accounts = await q<{ id: number }>('SELECT id FROM accounts WHERE user_id = $1', [Number(userId)]);
+  const accounts = await q<{ id: number; account_type: string }>('SELECT id, account_type FROM accounts WHERE user_id = $1', [Number(userId)]);
+  // Points accumulated while this account was Starter are not eligible to
+  // generate future pairing. This does not change any ledger or wallet entry.
+  if (isStarterRank(from)) {
+    for (const a of accounts) await exec('UPDATE accounts SET left_points=0, center_points=0, right_points=0 WHERE id=$1', [Number(a.id)]);
+  }
   for (const a of accounts) await setAccountRankSnapshot(Number(a.id), to);
   if (isStarterRank(from)) {
-    // Starter upgrade: the account now contributes pairing points to the
-    // upline for the first time (Premium = 1 pt, StarPremium = 3 pts).
-    // No direct referral commission is awarded for this upgrade.
-    for (const a of accounts) await processPointUpflow(Number(a.id), Number(userId));
+    // A Starter Mother Account upgrading starts contributing points upline.
+    // A Child Account upgrade must not add points or re-evaluate any upline.
+    for (const a of accounts) if (!isCA(a.account_type)) await processPointUpflow(Number(a.id), Number(userId));
   }
   if (pin) {
     await consumePin(Number(pin.id), Number(userId), actor?.role === 'admin' ? 'admin' : 'member', actor?.id ?? 0);
-    // Upgrading with a package code pays the sponsor the upgrade difference
-    // DR — except Starter upgrades, which never pay DR.
-    let dr = 0;
-    if (!isStarterRank(from) && Number(user.sponsor_id) > 0) {
-      dr = await payDirectReferral(Number(user.sponsor_id), user.username, to, ` (Upgrade PIN #${pin.id})`, Number(userId));
-      if (dr > 0) await exec('UPDATE users SET lifetime_dr_paid = lifetime_dr_paid + $1 WHERE id = $2', [dr, Number(user.sponsor_id)]);
-    }
+    // Upgrades do not pay direct referral, including Premium → StarPremium.
+    const dr = 0;
     await auditLog({
       actorUserId: actor?.id ?? Number(userId),
       actorUsername: actor?.username ?? user.username,

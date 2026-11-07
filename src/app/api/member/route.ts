@@ -204,7 +204,7 @@ export async function POST(req: Request) {
         id: Number(user.id), username: user.username, role: 'member',
       });
       if (!res.ok) return fail(res.error!);
-      return ok({ message: `Account upgraded from ${res.from} to ${res.to}! Points differential has been recalculated.` });
+      return ok({ message: `Account upgraded from ${res.from} to ${res.to}! Existing earnings remain in your account.` });
     }
 
     /* ---------------- orders ---------------- */

@@ -174,7 +174,9 @@ export async function processPointUpflow(
     );
     const isDirectChild = nodeId === currentNodeId;
 
-    if (uplineOwnerId !== origin) {
+    // Entries occurring while the receiving upline is Starter cannot accrue
+    // waiting points for release after the upline later upgrades.
+    if (uplineOwnerId !== origin && !isStarterRank(await getUserRankAt(uplineOwnerId, eventTime))) {
       if (!isDirectChild) {
         const column = leg === 'L' ? 'left_points' : leg === 'C' ? 'center_points' : 'right_points';
         const delta = leg === 'R' ? rPointsToAdd : pointsToAdd;
