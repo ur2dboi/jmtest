@@ -30,6 +30,7 @@ import { finalizeNewAccountStructure, payDirectReferral, processPointUpflow } fr
 import { requestEncashment } from '@/lib/engine/encash';
 import { generatePinRow } from '@/lib/order-actions';
 import { resolveMemberAccounts } from '@/lib/queries';
+import { productCodeKind } from '@/lib/product-code';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -274,11 +275,16 @@ export async function POST(req: Request) {
         }
         const res = await activateProductPin(Number(target.id), pin.pin_code, 'member', Number(user.id));
         if (!res.ok) return fail(res.error!);
-        return ok({
-          message: targetName
-            ? `Product Code Activated to '${targetName}'!`
-            : `Product ${pin.package_type} activated! Unilevel commissions distributed to your uplines.`,
-        });
+        const kind = productCodeKind(pin.pin_code);
+        const destination = targetName ? ` for '${target.username}'` : '';
+        const detail = kind === 'PCC'
+          ? (isStarterRank(target.rank)
+              ? 'Product Commission eligibility depends on the direct sponsor meeting the requirements.'
+              : 'This PCC code gives LP only when activated by a Premium or StarPremium member; no Product Commission or Unilevel is paid.')
+          : kind === 'UNI'
+            ? 'Unilevel commission eligibility depends on the uplines meeting the requirements.'
+            : 'This legacy code follows the activation rank and commission eligibility rules.';
+        return ok({ message: `${kind === 'PCC' ? 'Product Commission (PCC)' : kind === 'UNI' ? 'Unilevel (UNI)' : 'Legacy product'} code activated${destination}. ${detail}` });
       }
 
       const targetName = String(b.target ?? '').trim();

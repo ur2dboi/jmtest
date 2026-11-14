@@ -4,6 +4,7 @@ import React from 'react';
 import { api, Badge, confirmDialog, cx, Empty, Modal, peso, rankBadge, reloadSoon, Stat, Toast, useToast } from './ui';
 import TreeView, { type SlotInfo } from './TreeView';
 import { phFormat } from '@/lib/time';
+import { productCodeLabel } from '@/lib/product-code';
 import type { MemberPortalData } from '@/lib/queries';
 import type { AccountRow, LedgerRow, PinRow } from '@/lib/types';
 import type { TreeCell } from '@/lib/engine/tree';
@@ -956,9 +957,9 @@ function PurchasingTab(props: MemberPortalProps & { post: PostFn; busy: boolean;
           </div>
           <div className="tbl-wrap mt-3">
             <table className="tbl">
-              <thead><tr><th>Date</th><th>Product</th><th>Activate</th></tr></thead>
+              <thead><tr><th>Date</th><th>Product</th><th>Code / Type</th><th>Activate</th></tr></thead>
               <tbody>
-                {data.productPins.length === 0 && <tr><td colSpan={3} className="text-center text-zinc-500">No unused LP codes.</td></tr>}
+                {data.productPins.length === 0 && <tr><td colSpan={4} className="text-center text-zinc-500">No unused LP codes.</td></tr>}
                 {data.productPins.map((p) => (
                   <ProductPinRow key={p.id} pin={p} post={post} busy={busy} />
                 ))}
@@ -1117,6 +1118,7 @@ function ProductPinRow({ pin, post, busy }: { pin: PinRow; post: PostFn; busy: b
     <tr>
       <td className="text-zinc-500">{dt(pin.created_at, 'm/d/Y')}</td>
       <td className="font-bold text-sky-400">{pin.package_type}</td>
+      <td><code className="text-[11px]">{pin.pin_code}</code><div className="text-[11px] text-zinc-400">{productCodeLabel(pin.pin_code)}</div></td>
       <td>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -1153,18 +1155,18 @@ function ProductVaultTab(props: MemberPortalProps & { post: PostFn; busy: boolea
     <div className="card animate-fadeIn">
       <h3 className="text-[16px] font-bold text-gold">🎁 My Products Vault</h3>
       <p className="mt-1 text-[13px] text-zinc-500">
-        Your purchased products are held here. <b>Activate</b> a product to distribute unilevel commissions to your uplines, or <b>Transfer</b> it to another member who can activate it.
+        Your purchased products are held here. The issued code type stays the same after an upgrade. Commission eligibility depends on the code type, the activator’s rank, and the recipient’s qualifications.
       </p>
       {data.productPins.length === 0 ? (
         <Empty icon="🛒">No products in your vault.</Empty>
       ) : (
         <div className="tbl-wrap mt-4">
           <table className="tbl">
-            <thead><tr><th>Code</th><th>Product</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Code / Type</th><th>Product</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {data.productPins.map((p) => (
                 <tr key={p.id}>
-                  <td><code className="rounded bg-[#0a0a0a] px-1.5 py-0.5 text-[12px]">{p.pin_code}</code></td>
+                  <td><code className="rounded bg-[#0a0a0a] px-1.5 py-0.5 text-[12px]">{p.pin_code}</code><div className="mt-1 text-[11px] text-zinc-400">{productCodeLabel(p.pin_code)}</div></td>
                   <td className="font-bold">{p.package_type}</td>
                   <td><Badge tone="info">Unused</Badge></td>
                   <td>
@@ -1184,7 +1186,7 @@ function ProductVaultTab(props: MemberPortalProps & { post: PostFn; busy: boolea
         </div>
       )}
       <p className="mt-3 text-[11px] text-zinc-500">
-        💡 <b>Activate:</b> Use the product yourself. Commissions go to YOUR uplines. 💡 <b>Transfer:</b> Send to another member. They activate and commissions go to THEIR uplines.
+        PCC codes can generate Product Commission only when activated by a Starter; Premium and StarPremium activations of PCC earn LP only. UNI codes follow Unilevel eligibility. Legacy codes without a prefix follow the activator’s rank. Transfer lets another member activate the code under their own eligibility.
       </p>
 
       <Modal open={!!transferPin} onClose={() => setTransferPin(null)} title="📦 Transfer Product">
