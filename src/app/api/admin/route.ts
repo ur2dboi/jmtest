@@ -1,4 +1,4 @@
-import { exec, one, q, scalar } from '@/lib/db';
+import { exec, one, q, scalar, tx } from '@/lib/db';
 import { ensureSettings, saveSettings, settingBool } from '@/lib/settings';
 import { hashPassword, validAlnumPassword, passwordPolicyMessage } from '@/lib/auth';
 import { adminActor, audit, body, err, fail, ok } from '@/lib/http';
@@ -16,12 +16,7 @@ import { releaseMaturedUnilevelCommissions, handleProductActivationUnilevel, mar
 import { approveEncashment, listEncashments, rejectEncashment } from '@/lib/engine/encash';
 import { moveNode } from '@/lib/engine/tree';
 import {
-  fullRebuild,
   getRebuildState,
-  initBatchRebuild,
-  runBatchStep,
-  totalFinancialWipe,
-  wipeGhostPoints,
 } from '@/lib/engine/rebuild';
 import { clearAlertHistory } from '@/lib/queries';
 import { approveOrder, generatePinRow, rejectOrder, transferOrder } from '@/lib/order-actions';
@@ -289,14 +284,17 @@ export async function POST(req: Request) {
     if (action === 'pin-delete' || action === 'pins-bulk-delete') {
       const ids = action === 'pin-delete' ? [Number(b.pin_id)] : ((b.pin_ids as unknown[]) ?? []).map(Number);
       let deleted = 0;
-      for (const id of ids) if (id) deleted += await exec('DELETE FROM pins WHERE id=$1', [id]);
-      await audit(actor, 'admin', 'DELETE PIN(S)', { ids });
-      return ok({ message: `Success! ${deleted} code(s) permanently deleted.` });
+      for (const id of ids) if (id) deleted += await exec(`DELETE FROM pins WHERE id=$1 AND status<>'used'
+        AND NOT EXISTS (SELECT 1 FROM ledger WHERE source_product_pin_id=pins.id)
+        AND NOT EXISTS (SELECT 1 FROM commission_event_targets WHERE pin_id=pins.id)`, [id]);
+      await audit(actor, 'admin', 'DELETE UNUSED PIN(S)', { ids, deleted });
+      return ok({ message: `${deleted} unused code(s) deleted. Activated or source-linked codes are retained to protect commission history.` });
     }
     if (action === 'pin-transfer') {
       const target = await one<UserRow>('SELECT * FROM users WHERE username=$1', [String(b.target ?? '')]);
       if (!target) return fail('New Purchaser Username not found.');
-      await exec('UPDATE pins SET purchaser_id=$1 WHERE id=$2', [target.id, Number(b.pin_id)]);
+      const changed = await exec("UPDATE pins SET purchaser_id=$1 WHERE id=$2 AND status='unused'", [target.id, Number(b.pin_id)]);
+      if (!changed) return fail('Only unused codes can be transferred.');
       return ok({ message: `Success! Pin Code ownership transferred to @${target.username}.` });
     }
     if (action === 'product-auto-activate-all' || action === 'product-activate-entry') {
@@ -306,9 +304,14 @@ export async function POST(req: Request) {
       let activated = 0;
       for (const p of pins) {
         if (Number(p.purchaser_id) < 2) continue;
-        await markProductPinUsed(Number(p.id), Number(p.purchaser_id), 'admin');
-        await handleProductActivationUnilevel(Number(p.purchaser_id), 1);
-        activated++;
+        const didActivate = await tx(async () => {
+          if (!(await markProductPinUsed(Number(p.id), Number(p.purchaser_id), 'admin'))) return false;
+          await exec('UPDATE users SET lp=lp+1 WHERE id=$1',[Number(p.purchaser_id)]);
+          const kind = /^PCC-/i.test(p.pin_code) ? 'PCC' : /^UNI-/i.test(p.pin_code) ? 'UNI' : null;
+          await handleProductActivationUnilevel(Number(p.purchaser_id), 1, kind, Number(p.id));
+          return true;
+        });
+        if (didActivate) activated++;
       }
       return ok({ message: activated ? `Auto-activated ${activated} loose product(s). Unilevel commissions distributed.` : 'No loose products found to activate.' });
     }
@@ -381,30 +384,12 @@ export async function POST(req: Request) {
     }
 
     /* ---------------- rebuild ---------------- */
-    if (action === 'rebuild-start') {
-      const state = await initBatchRebuild(actorRef);
-      return ok({ message: 'Batch rebuild started.', state });
+    if (action === 'rebuild-start' || action === 'rebuild-step' || action === 'rebuild-full') {
+      return fail('Earnings rebuild is temporarily unavailable because it can overwrite existing earnings.');
     }
-    if (action === 'rebuild-step') {
-      const state = await runBatchStep(Number(b.batch_id ?? 1));
-      return ok({ state });
-    }
-    if (action === 'rebuild-state') {
-      return ok({ state: await getRebuildState() });
-    }
-    if (action === 'rebuild-full') {
-      const msg = await fullRebuild({ skipPairing: !!b.skip_pairing, actor: actorRef });
-      return ok({ message: msg });
-    }
-    if (action === 'wipe-points') {
-      const wiped = await wipeGhostPoints();
-      await audit(actor, 'danger', 'WIPE GHOST POINTS', { wiped });
-      return ok({ message: `Ghost Points Wiped! ${wiped} account(s) reset.` });
-    }
-    if (action === 'wipe-ledger') {
-      if (String(b.confirm ?? '') !== 'WIPE') return fail('Type WIPE to confirm the total financial wipe.');
-      const msg = await totalFinancialWipe(actorRef);
-      return ok({ message: msg });
+    if (action === 'rebuild-state') return ok({ state: await getRebuildState() });
+    if (action === 'wipe-points' || action === 'wipe-ledger') {
+      return fail('Destructive financial and point wipes are unavailable while earnings and provenance are protected.');
     }
 
     /* ---------------- alerts / logs / backup ---------------- */

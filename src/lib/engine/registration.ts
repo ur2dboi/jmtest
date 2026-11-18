@@ -1,4 +1,4 @@
-import { exec, one, q, scalar } from '../db';
+import { exec, one, q, scalar, tx } from '../db';
 import type { AccountRow, PinRow, Position, UserRow } from '../types';
 import { hashPassword, validAlnumPassword } from '../auth';
 import { phFormat } from '../time';
@@ -193,7 +193,7 @@ export interface RegisterResult {
   placementNote?: string;
 }
 
-export async function registerMember(input: RegisterInput): Promise<RegisterResult> {
+async function registerMemberInternal(input: RegisterInput): Promise<RegisterResult> {
   const username = String(input.username ?? '').trim();
   const password = String(input.password ?? '');
   const when = input.eventTime ?? new Date();
@@ -331,7 +331,7 @@ export async function registerMember(input: RegisterInput): Promise<RegisterResu
 
   /* --- consume the pin --- */
   if (pin) {
-    await consumePin(Number(pin.id), newUserId, input.actor?.role === 'admin' ? 'admin' : 'member', input.actor?.id ?? 0);
+    if (!(await consumePin(Number(pin.id), newUserId, input.actor?.role === 'admin' ? 'admin' : 'member', input.actor?.id ?? 0))) throw new Error('Activation code was already used.');
   }
 
   /* --- direct referral bonus to the sponsor only --- */
@@ -398,6 +398,10 @@ export async function registerMember(input: RegisterInput): Promise<RegisterResu
   };
 }
 
+export async function registerMember(input: RegisterInput): Promise<RegisterResult> {
+  return tx(() => registerMemberInternal(input));
+}
+
 async function resolveOwnerMa(ca: AccountRow): Promise<AccountRow | null> {
   let current: AccountRow | null = ca;
   let safety = 0;
@@ -435,7 +439,7 @@ export interface CaActivationInput {
  * node: it never earns the owner's direct referrals and never consumes a
  * unilevel tier.
  */
-export async function activateCa(
+async function activateCaInternal(
   input: CaActivationInput,
 ): Promise<{ ok: boolean; error?: string; accountId?: number; caUserId?: number; slot?: string }> {
   const owner = await userById(Number(input.userId));
@@ -535,7 +539,7 @@ export async function activateCa(
   await setAccountRankSnapshot(caId, rank);
   if (input.isFree) await syncFreeAccountKindMeta(caUserId, 'CA');
   if (pin) {
-    await consumePin(Number(pin.id), caUserId, input.actor?.role === 'admin' ? 'admin' : 'member', input.actor?.id ?? 0);
+    if (!(await consumePin(Number(pin.id), caUserId, input.actor?.role === 'admin' ? 'admin' : 'member', input.actor?.id ?? 0))) throw new Error('Activation code was already used.');
   }
 
   // CAs participate in point upflow; the direct-child skip prevents self-pairing.
@@ -559,9 +563,13 @@ export async function activateCa(
   return { ok: true, accountId: caId, caUserId, slot: `${label} (${slot})` };
 }
 
+export async function activateCa(input: CaActivationInput): Promise<{ ok: boolean; error?: string; accountId?: number; caUserId?: number; slot?: string }> {
+  return tx(() => activateCaInternal(input));
+}
+
 /* ------------------------- rank upgrade ------------------------- */
 
-export async function upgradeRank(
+async function upgradeRankInternal(
   userId: number,
   targetRank: string,
   pinCode?: string,
@@ -585,11 +593,8 @@ export async function upgradeRank(
   invalidateUser(Number(userId)); // portal must show the new rank immediately after reload
   await addRankHistory(Number(userId), from, to);
   const accounts = await q<{ id: number; account_type: string }>('SELECT id, account_type FROM accounts WHERE user_id = $1', [Number(userId)]);
-  // Points accumulated while this account was Starter are not eligible to
-  // generate future pairing. This does not change any ledger or wallet entry.
-  if (isStarterRank(from)) {
-    for (const a of accounts) await exec('UPDATE accounts SET left_points=0, center_points=0, right_points=0 WHERE id=$1', [Number(a.id)]);
-  }
+  // Historical aggregate points are not evidence of eligibility. Preserve
+  // them for review; the pairing engine spends only source-linked points.
   for (const a of accounts) await setAccountRankSnapshot(Number(a.id), to);
   if (isStarterRank(from)) {
     // A Starter Mother Account upgrading starts contributing points upline.
@@ -597,7 +602,7 @@ export async function upgradeRank(
     for (const a of accounts) if (!isCA(a.account_type)) await processPointUpflow(Number(a.id), Number(userId));
   }
   if (pin) {
-    await consumePin(Number(pin.id), Number(userId), actor?.role === 'admin' ? 'admin' : 'member', actor?.id ?? 0);
+    if (!(await consumePin(Number(pin.id), Number(userId), actor?.role === 'admin' ? 'admin' : 'member', actor?.id ?? 0))) throw new Error('Upgrade code was already used.');
     // Upgrades do not pay direct referral, including Premium → StarPremium.
     const dr = 0;
     await auditLog({
@@ -624,6 +629,16 @@ export async function upgradeRank(
     details: { from, to },
   });
   return { ok: true, from, to };
+}
+
+export async function upgradeRank(
+  userId: number, targetRank: string, pinCode?: string,
+  actor?: { id: number; username: string; role: 'member' | 'admin' },
+): Promise<{ ok: boolean; error?: string; from?: string; to?: string; dr?: number }> {
+  return tx(async (client) => {
+    await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[Number(userId)]);
+    return upgradeRankInternal(userId, targetRank, pinCode, actor);
+  });
 }
 
 /* ---------------------------- orders ---------------------------- */
@@ -726,7 +741,7 @@ export async function transferFunds(
 
 /* ---------------------- product activation ---------------------- */
 
-export async function activateProductPin(
+async function activateProductPinInternal(
   userId: number,
   pinCode: string,
   source: 'member' | 'admin' = 'member',
@@ -741,11 +756,11 @@ export async function activateProductPin(
   // Starter Product Commission via handleProductActivationUnilevel.
 
   const { markProductPinUsed, handleProductActivationUnilevel, usedProductPinCount } = await import('./unilevel');
-  await markProductPinUsed(Number(check.pin.id), Number(userId), source, actorId);
+  if (!(await markProductPinUsed(Number(check.pin.id), Number(userId), source, actorId))) return { ok: false, error: 'Product code was already activated.' };
   await exec('UPDATE users SET lp = lp + 1 WHERE id = $1', [Number(userId)]);
   const activatedCode = String(check.pin.pin_code || '');
   const codeKind = /^UNI-/i.test(activatedCode) ? 'UNI' : /^PCC-/i.test(activatedCode) ? 'PCC' : null;
-  await handleProductActivationUnilevel(Number(userId), 1, codeKind);
+  await handleProductActivationUnilevel(Number(userId), 1, codeKind, Number(check.pin.id));
   await auditLog({
     actorUserId: actorId || Number(userId),
     actorUsername: source === 'admin' ? (await userById(actorId))?.username ?? 'admin' : user.username,
@@ -757,6 +772,12 @@ export async function activateProductPin(
     details: { pin: check.pin.pin_code, product: check.pin.package_type },
   });
   return { ok: true, lp: await usedProductPinCount(Number(userId)) };
+}
+
+export async function activateProductPin(
+  userId: number, pinCode: string, source: 'member' | 'admin' = 'member', actorId = 0,
+): Promise<{ ok: boolean; error?: string; lp?: number }> {
+  return tx(() => activateProductPinInternal(userId, pinCode, source, actorId));
 }
 
 /* ------------------------- member ID card ------------------------- */

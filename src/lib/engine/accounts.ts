@@ -1,4 +1,4 @@
-import { exec, one, q, scalar } from '../db';
+import { exec, one, q, scalar, inTransaction } from '../db';
 import { phMonthKey, phToday, toDate } from '../time';
 import { settingBool, settingInt, settingNum } from '../settings';
 import type { AccountRow, Position, UserRow } from '../types';
@@ -25,11 +25,9 @@ export function invalidateAllUsers(): void {
 export async function userById(id: number): Promise<UserRow | null> {
   const key = Number(id);
   if (!key) return null;
-  const cached = userCache.get(key);
-  if (cached) return cached;
-  const row = await one<UserRow>('SELECT * FROM users WHERE id = $1', [key]);
-  if (row) userCache.set(key, row);
-  return row;
+  if (inTransaction()) return one<UserRow>('SELECT * FROM users WHERE id = $1', [key]);
+  // Cross-instance caches can retain an old rank or balance indefinitely.
+  return one<UserRow>('SELECT * FROM users WHERE id = $1', [key]);
 }
 
 export async function accountById(id: number): Promise<AccountRow | null> {
@@ -464,22 +462,15 @@ export async function getMonthlyLp(userId: number): Promise<number> {
 }
 
 export async function bumpMonthlyLp(userId: number, by = 1): Promise<number> {
-  const user = await userById(userId);
-  const current = phMonthKey();
-  const resetOn = unilevelMonthlyResetOn();
-  const base = !resetOn
-    ? Number(user?.monthly_lp) || 0
-    : user?.monthly_lp_period === current
-      ? Number(user?.monthly_lp) || 0
-      : 0;
-  const next = Math.max(0, base + Number(by));
-  await exec('UPDATE users SET monthly_lp = $1, monthly_lp_period = $2 WHERE id = $3', [
-    next,
-    resetOn ? current : (user?.monthly_lp_period || current),
-    userId,
-  ]);
+  const period = phMonthKey();
+  const reset = unilevelMonthlyResetOn();
+  const rows = await q<{monthly_lp: number}>(
+    `UPDATE users SET monthly_lp = GREATEST(0, (CASE WHEN $3::boolean AND monthly_lp_period IS DISTINCT FROM $2
+       THEN 0 ELSE COALESCE(monthly_lp,0) END) + $4),
+       monthly_lp_period = CASE WHEN $3::boolean THEN $2 ELSE COALESCE(NULLIF(monthly_lp_period,''),$2) END
+     WHERE id=$1 RETURNING monthly_lp`, [userId,period,reset,Number(by)]);
   invalidateUser(userId);
-  return next;
+  return Number(rows[0]?.monthly_lp || 0);
 }
 
 export async function getUsedProductLp(userId: number): Promise<number> {

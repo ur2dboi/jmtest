@@ -1,4 +1,4 @@
-import { exec, one, q, scalar } from '@/lib/db';
+import { exec, one, q, scalar, tx } from '@/lib/db';
 import { ensureSettings, settingBool } from '@/lib/settings';
 import { setActiveNode, validAlnumPassword, passwordPolicyMessage } from '@/lib/auth';
 import { audit, body, err, fail, memberActor, ok } from '@/lib/http';
@@ -70,8 +70,9 @@ export async function POST(req: Request) {
     }
 
     /* ---------------- pending activation ---------------- */
-    if (action === 'activate-pending') {
-      if (user.activation_status !== 'pending') return fail('Account is already active.');
+    if (action === 'activate-pending') return await tx(async () => {
+      const lockedUser = await one<UserRow>('SELECT * FROM users WHERE id=$1 FOR UPDATE',[Number(user.id)]);
+      if (!lockedUser || lockedUser.activation_status !== 'pending') return fail('Account is already active.');
       let pin: PinRow | null = null;
       const code = String(b.code ?? '').trim();
       if (code) {
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
       const packageType = pin.package_type;
       await exec(`UPDATE users SET rank=$1, activation_status='active' WHERE id=$2`, [packageType, user.id]);
       invalidateUser(Number(user.id));
-      await consumePin(Number(pin.id), Number(user.id), 'member', Number(user.id));
+      if (!(await consumePin(Number(pin.id), Number(user.id), 'member', Number(user.id)))) throw new Error('Activation code was already used.');
       const rows = await q<{ id: number }>(
         `INSERT INTO accounts (user_id, sponsor_id, upline_id, position, account_type, depth, rank_snapshot, activated_at, status)
          VALUES ($1,$2,$3,$4,'MA',0,$5,now(),1) RETURNING id`,
@@ -111,7 +112,7 @@ export async function POST(req: Request) {
       await processPointUpflow(maId, Number(user.id));
       await audit(actor, 'registration', 'ACCOUNT ACTIVATION (CODE)', { pin: pin.pin_code, pkg: packageType });
       return ok({ message: 'Activation Complete! Welcome to the Dashboard.' });
-    }
+    });
 
     // Everything below requires an active account
     if (user.activation_status === 'pending') return fail('Account is pending activation.', 403);

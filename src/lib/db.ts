@@ -1,4 +1,7 @@
-import { Pool, type QueryResultRow } from 'pg';
+import { Pool, type QueryResultRow, type PoolClient } from 'pg';
+import { AsyncLocalStorage } from 'node:async_hooks';
+const transactionContext = new AsyncLocalStorage<PoolClient>();
+export function inTransaction(): boolean { return !!transactionContext.getStore(); }
 
 /**
  * Single shared Postgres pool.
@@ -50,7 +53,7 @@ export async function q<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const res = await pool.query(sql, params as never[]);
+  const res = await (transactionContext.getStore() ?? pool).query(sql, params as never[]);
   return res.rows as T[];
 }
 
@@ -84,7 +87,7 @@ export async function scalar<T = unknown>(
 }
 
 export async function exec(sql: string, params: unknown[] = []): Promise<number> {
-  const res = await pool.query(sql, params as never[]);
+  const res = await (transactionContext.getStore() ?? pool).query(sql, params as never[]);
   return res.rowCount ?? 0;
 }
 
@@ -95,22 +98,19 @@ export async function exec(sql: string, params: unknown[] = []): Promise<number>
 export async function tx<T>(
   fn: (client: import('pg').PoolClient) => Promise<T>,
 ): Promise<T> {
+  const current = transactionContext.getStore();
+  if (current) return fn(current);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const out = await fn(client);
-    await client.query('COMMIT');
+    const out = await transactionContext.run(client, () => fn(client));
+    const committed = await client.query('COMMIT');
+    if (committed.command !== 'COMMIT') throw new Error('Transaction was aborted and could not be committed.');
     return out;
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      /* ignore rollback failure */
-    }
+    try { await client.query('ROLLBACK'); } catch { /* retain original error */ }
     throw err;
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 }
 
 export async function ping(): Promise<{ ok: boolean; message: string }> {

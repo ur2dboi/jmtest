@@ -1,4 +1,4 @@
-import { exec, one, q, scalar } from '../db';
+import { exec, one, q, scalar, tx } from '../db';
 import { phFormat, phPairingDayWindow } from '../time';
 import { settingInt, settingNum } from '../settings';
 import type { AccountRow, LedgerStatus, LedgerType, Position } from '../types';
@@ -19,7 +19,6 @@ import {
   syncFreeAccountKindMeta,
   userById,
 } from './accounts';
-import { legQualifyingDownlineCount, triLegStructuralCap } from './placement';
 
 /* =====================================================================
  * KAMADA POINT UPFLOW + TRI-LEG MATRIX ENGINE
@@ -124,10 +123,21 @@ async function freeCanPayDirectReferralSafe(user: Awaited<ReturnType<typeof user
   return freeCanPayDirectReferral(user);
 }
 
+/** An out-of-order event can be processed at the later event time only if
+ * it is the same pairing day and rank, and no subsequent pairing output has
+ * already been issued. Otherwise ordering could change a cap or GC decision. */
+async function safelyAdvancePairingTime(userId: number, earlier: Date, later: Date): Promise<boolean> {
+  if (phPairingDayWindow(earlier).start.getTime() !== phPairingDayWindow(later).start.getTime()) return false;
+  if ((await getUserRankAt(userId,earlier)) !== (await getUserRankAt(userId,later))) return false;
+  const alreadyIssued = await scalar<boolean>(`SELECT EXISTS(SELECT 1 FROM ledger WHERE user_id=$1
+    AND (note LIKE '%A+B Pair%' OR note LIKE '%Tri-Leg Release%') AND created_at>$2)`,[userId,earlier]);
+  return !alreadyIssued;
+}
+
 /* =====================================================================
  * POINT UPFLOW
  * ===================================================================== */
-export async function processPointUpflow(
+async function processPointUpflowInternal(
   newNodeId: number,
   originUserId: number,
   eventTimeOverride?: Date,
@@ -174,18 +184,36 @@ export async function processPointUpflow(
     );
     const isDirectChild = nodeId === currentNodeId;
 
-    // Entries occurring while the receiving upline is Starter cannot accrue
-    // waiting points for release after the upline later upgrades.
+    // An account which was Starter when this entry occurred must never
+    // accumulate pairing points for later release after it upgrades.
     if (uplineOwnerId !== origin && !isStarterRank(await getUserRankAt(uplineOwnerId, eventTime))) {
       if (!isDirectChild) {
         const column = leg === 'L' ? 'left_points' : leg === 'C' ? 'center_points' : 'right_points';
         const delta = leg === 'R' ? rPointsToAdd : pointsToAdd;
-        await exec(`UPDATE accounts SET ${column} = ${column} + $1 WHERE id = $2`, [delta, uplineId]);
+        // Serialize against other source events before checking event order.
+        // A delayed older event cannot safely spend newer contributions or be
+        // backdated into a different daily capacity window.
+        await one('SELECT id FROM accounts WHERE id=$1 FOR UPDATE',[uplineId]);
+        const latest = await one<{when: Date | null}>('SELECT MAX(occurred_at) AS "when" FROM pairing_contributions WHERE recipient_account_id=$1',[uplineId]);
+        const latestTime = latest?.when ? new Date(latest.when) : null;
+        const outOfOrder = !!latestTime && latestTime.getTime()>eventTime.getTime() &&
+          !(await safelyAdvancePairingTime(uplineOwnerId,eventTime,latestTime));
+        const recorded = await one<{ source_account_id: number }>(
+          `INSERT INTO pairing_contributions(recipient_account_id,source_account_id,source_user_id,leg,source_rank,ab_points,right_points,occurred_at,review_required)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(recipient_account_id,source_account_id) DO NOTHING RETURNING source_account_id`,
+          [uplineId,nodeId,origin,leg,rank,pointsToAdd,rPointsToAdd,eventTime,outOfOrder]);
+        if (recorded) await exec(`UPDATE accounts SET ${column} = ${column} + $1 WHERE id = $2`, [delta, uplineId]);
+        if (recorded && outOfOrder) await exec(`INSERT INTO pairing_review(account_id,reason)
+          VALUES($1,'An out-of-order source event requires review before its points can be consumed.') ON CONFLICT(account_id) DO NOTHING`,[uplineId]);
       }
       await evaluatePairs(uplineId, origin, eventTime);
     }
     currentNodeId = uplineId;
   }
+}
+
+export async function processPointUpflow(newNodeId: number, originUserId: number, eventTimeOverride?: Date, syncStructure = true): Promise<void> {
+  return tx(() => processPointUpflowInternal(newNodeId, originUserId, eventTimeOverride, syncStructure));
 }
 
 async function freeFlag(user: NonNullable<Awaited<ReturnType<typeof userById>>>, which: 'receive' | 'count' | 'dr'): Promise<boolean> {
@@ -219,8 +247,17 @@ export async function finalizeNewAccountStructure(newAccountId: number, originUs
  * PAIR EVALUATION
  * ===================================================================== */
 export async function evaluatePairs(accountId: number, sourceUserId = 0, eventTimeInput?: Date): Promise<void> {
+  return tx(async (client) => {
+    // The row lock serializes accrual, payout, point consumption and GC.
+    const locked = await client.query('SELECT id FROM accounts WHERE id=$1 FOR UPDATE',[Number(accountId)]);
+    if (!locked.rowCount) return;
+    await evaluatePairsLocked(accountId, sourceUserId, eventTimeInput);
+  });
+}
+
+async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTimeInput?: Date): Promise<void> {
   const account = await accountById(Number(accountId));
-  if (!account) return;
+  if (!account || isCA(account.account_type)) return; // CAs never receive pairing or pairing GC.
 
   const sourceId = Number(sourceUserId);
   if (sourceId > 0) {
@@ -234,7 +271,16 @@ export async function evaluatePairs(accountId: number, sourceUserId = 0, eventTi
   if (isAccountOnHold(owner)) return; // held accounts keep waiting points, no releases
   if (owner && !(await freeFlag(owner, 'receive'))) return;
 
-  const eventTime = eventTimeInput ?? new Date();
+  let eventTime = eventTimeInput ?? new Date();
+  const latest = await one<{when: Date | null}>('SELECT MAX(occurred_at) AS "when" FROM pairing_contributions WHERE recipient_account_id=$1',[accountId]);
+  const latestTime = latest?.when ? new Date(latest.when) : null;
+  if (latestTime && latestTime.getTime()>eventTime.getTime()) {
+    if (!(await safelyAdvancePairingTime(userId,eventTime,latestTime))) {
+      await exec(`INSERT INTO pairing_review(account_id,reason) VALUES($1,'An earlier event arrived after a later contribution; hold it for review to avoid backdated payouts.') ON CONFLICT(account_id) DO NOTHING`,[accountId]);
+      return;
+    }
+    eventTime = latestTime;
+  }
   const rank = await getUserRankAt(userId, eventTime);
   if (isStarterRank(rank)) return;
 
@@ -256,219 +302,118 @@ export async function evaluatePairs(accountId: number, sourceUserId = 0, eventTi
   const sourceName = sourceId > 0 ? ((await userById(sourceId))?.username ?? '') : '';
   const fromNote = sourceName ? ` (from: @${sourceName})` : '';
 
-  /* ---------------- PHASE 1: A+B POINT MATCHING ---------------- */
-  const abDoneToday = Number(
-    (await scalar<string>(
-      `SELECT COUNT(*) FROM ledger
-       WHERE user_id = $1 AND note LIKE '%A+B Pair%' AND note NOT LIKE '%Flush Out%'
-         AND created_at >= $2 AND created_at < $3`,
-      [userId, dayStart, dayEnd],
-    )) ?? 0,
-  );
-  const existingAbCount = Number(
-    (await scalar<string>(
-      `SELECT COUNT(*) FROM ledger
-       WHERE user_id = $1 AND note LIKE '%A+B Pair%' AND note NOT LIKE '%Flush Out%'`,
-      [userId],
-    )) ?? 0,
-  );
-
+  // Contributions recorded before the provenance migration cannot safely be
+  // reconstructed from aggregate points or ledger prose. Keep them untouched,
+  // flag them, and spend only point units with immutable new source records.
+  type Contribution = { source_account_id: number; source_user_id: number; leg: Position; source_rank: string;
+    ab_points: number; right_points: number; ab_consumed: number; right_consumed: number; review_required: boolean; occurred_at: Date };
+  const contributions = await q<Contribution>(
+    `SELECT * FROM pairing_contributions WHERE recipient_account_id=$1 ORDER BY occurred_at,source_account_id`, [accountId]);
+  const legRows = (leg: Position) => contributions.filter(x => x.leg === leg && !x.review_required);
+  const remainingAb = (x: Contribution) => Number(x.ab_points) - Number(x.ab_consumed);
+  const remainingR = (x: Contribution) => Number(x.right_points) - Number(x.right_consumed);
+  const sumRemainingAb = (leg: Position) => legRows(leg).reduce((sum,x) => sum+remainingAb(x),0);
+  const availableL = sumRemainingAb('L'), availableC = sumRemainingAb('C');
+  const availableR = legRows('R').reduce((sum,x) => sum+remainingR(x),0);
+  const totalL = contributions.filter(x => x.leg==='L').reduce((sum,x)=>sum+remainingAb(x),0);
+  const totalC = contributions.filter(x => x.leg==='C').reduce((sum,x)=>sum+remainingAb(x),0);
+  const totalR = contributions.filter(x => x.leg==='R').reduce((sum,x)=>sum+remainingR(x),0);
+  const invalid = contributions.some(x => Number(x.ab_consumed)<0 || Number(x.right_consumed)<0 ||
+    Number(x.ab_consumed)>Number(x.ab_points) || Number(x.right_consumed)>Number(x.right_points));
+  if (invalid || totalL>lPts || totalC>cPts || totalR>rPts) {
+    await exec(`INSERT INTO pairing_review(account_id,reason) VALUES($1,'Recorded source points disagree with account totals; preserve balances and investigate.') ON CONFLICT(account_id) DO NOTHING`, [accountId]);
+    return;
+  }
+  if (lPts>totalL || cPts>totalC || rPts>totalR) {
+    await exec(`INSERT INTO pairing_review(account_id,reason) VALUES($1,'Legacy pairing points lack immutable source records; held for review while new verified points are processed separately.') ON CONFLICT(account_id) DO NOTHING`, [accountId]);
+  }
+  const abDoneToday = Number((await scalar<string>(
+    `SELECT COUNT(*) FROM ledger WHERE user_id=$1 AND note LIKE '%A+B Pair%' AND note NOT LIKE '%Flush Out%'
+     AND created_at >= $2 AND created_at < $3`, [userId,dayStart,dayEnd])) ?? 0);
+  const existingAbCount = Number((await scalar<string>(
+    `SELECT COUNT(*) FROM ledger WHERE user_id=$1 AND note LIKE '%A+B Pair%' AND note NOT LIKE '%Flush Out%'`, [userId])) ?? 0);
   let abReleasedNow = 0;
   let abFlushedNow = 0;
-  while (lPts >= 1 && cPts >= 1) {
-    lPts--;
-    cPts--;
+  while (true) {
+    const left = legRows('L').find(x => remainingAb(x)>0);
+    const center = legRows('C').find(x => remainingAb(x)>0);
+    if (!left || !center) break;
+    let ledgerId: number;
     if (abDoneToday + abReleasedNow >= dailyAbLimit) {
-      // Daily max reached: the matched pair is flushed (no bonus).
-      await insertLedger({
-        user_id: userId,
-        amount: 0,
-        type: 'cash',
-        status: 'active',
-        note: `Flush Out - A+B Pair exceeded daily limit (${dailyAbLimit}/day)${fromNote} [${account.account_type}]`,
-        created_at: eventTime,
-      });
+      ledgerId = await insertLedger({user_id:userId,amount:0,type:'cash',status:'active',
+        note:`Flush Out - A+B Pair exceeded daily limit (${dailyAbLimit}/day)${fromNote} [${account.account_type}]`,created_at:eventTime});
       abFlushedNow++;
-      continue;
-    }
-    const pairNo = existingAbCount + abReleasedNow + 1;
-    if (pairNo % gcEvery === 0) {
-      await insertLedger({
-        user_id: userId,
-        amount: 1,
-        type: 'gc',
-        status: 'active',
-        note: `A+B Pair GC (5th) - Pair #${pairNo} (${nowTime})${fromNote} [${account.account_type}]`,
-        created_at: eventTime,
-      });
     } else {
-      await insertLedger({
-        user_id: userId,
-        amount: bpAmount,
-        type: 'cash',
-        status: 'released',
-        note: `A+B Pair #${pairNo} Released (P${bpAmount}) (${nowTime})${fromNote} [${account.account_type}]`,
-        created_at: eventTime,
-      });
-      await addToWallet(userId, bpAmount);
-    }
-    abReleasedNow++;
-  }
-  if (abReleasedNow + abFlushedNow > 0) {
-    await exec('UPDATE accounts SET left_points = $1, center_points = $2 WHERE id = $3', [
-      Math.max(0, lPts),
-      Math.max(0, cPts),
-      Number(accountId),
-    ]);
-  }
-
-  /* ---------------- PHASE 2: TRI-LEG / RIGHT-LEG MATCHING ---------------- */
-  // Flushed A+B rows still count as consumed triggers for Tri-Leg eligibility.
-  let completedAbCount = Number(
-    (await scalar<string>(`SELECT COUNT(*) FROM ledger WHERE user_id = $1 AND note LIKE '%A+B Pair%'`, [userId])) ?? 0,
-  );
-  const structuralAbCap = Math.min(
-    await legQualifyingDownlineCount(Number(accountId), 'L'),
-    await legQualifyingDownlineCount(Number(accountId), 'C'),
-  );
-  completedAbCount = Math.max(completedAbCount, structuralAbCap);
-  // Gated by real account-count balance across all three legs at all depths.
-  completedAbCount = Math.min(completedAbCount, await triLegStructuralCap(Number(accountId)));
-
-  let triDone = await freshPairingCount(Number(accountId));
-  if (rPts < 1 || triDone >= completedAbCount) return;
-
-  // Right-leg sources in placement order (the direct child gives no point).
-  const rSourceNames: { name: string; star: boolean }[] = [];
-  const rLegRoot = Number(
-    (await scalar<number>(`SELECT id FROM accounts WHERE upline_id = $1 AND position = 'R' LIMIT 1`, [
-      Number(accountId),
-    ])) ?? 0,
-  );
-  if (rLegRoot) {
-    const levels = await subtreeByDepth(rLegRoot, 50);
-    const descendants: number[] = [];
-    for (const [depth, ids] of Object.entries(levels)) {
-      if (Number(depth) === 0) continue;
-      descendants.push(...ids);
-    }
-    if (descendants.length) {
-      const members = await q<{ id: number; user_id: number }>(
-        'SELECT id, user_id FROM accounts WHERE id = ANY($1::bigint[]) ORDER BY id ASC',
-        [descendants],
-      );
-      for (const m of members) {
-        if (Number(m.user_id) === userId) continue;
-        const mu = await userById(Number(m.user_id));
-        if (!mu) continue;
-        // Earnings-source filter only: disabled free accounts stay structural.
-        if (!(await freeFlag(mu, 'count'))) continue;
-        const mRank = mu.rank || 'Premium';
-        if (isStarterRank(mRank)) continue;
-        rSourceNames.push({ name: mu.username, star: isStarRank(mRank) });
-      }
-    }
-  }
-
-  const existingTriUnits = Number(
-    (await scalar<string>(`SELECT COUNT(*) FROM ledger WHERE user_id = $1 AND note LIKE '%Tri-Leg Release%'`, [
-      userId,
-    ])) ?? 0,
-  );
-  const cDoneToday = Number(
-    (await scalar<string>(
-      `SELECT COUNT(*) FROM ledger
-       WHERE user_id = $1 AND note LIKE '%Tri-Leg Release%' AND created_at >= $2 AND created_at < $3`,
-      [userId, dayStart, dayEnd],
-    )) ?? 0,
-  );
-
-  let triReleasedNow = 0;
-  let flushedC = 0;
-  let triUnitsInserted = 0;
-
-  while (rPts >= 1) {
-    triDone = await freshPairingCount(Number(accountId));
-    if (triDone + triReleasedNow + flushedC >= completedAbCount) break;
-    const srcIdx = triDone + triReleasedNow + flushedC;
-    const src = rSourceNames[srcIdx] ?? null;
-    const rFrom = src && src.name ? ` (from: @${src.name})` : '';
-    const srcLbl = src && src.star ? 'StarPremium Source' : 'Premium Source';
-    const maLbl = isStar ? 'StarPremium' : 'Premium';
-    const unitCount = isStar && src && src.star ? 2 : 1;
-
-    for (let unitI = 1; unitI <= unitCount; unitI++) {
-      const unitNo = existingTriUnits + triUnitsInserted + 1;
-      const unitNote = unitCount > 1 ? ` Unit ${unitI}/${unitCount}` : '';
-      if (cDoneToday + triUnitsInserted >= dailyCLimit) {
-        await insertLedger({
-          user_id: userId,
-          amount: 0,
-          type: 'cash',
-          status: 'active',
-          note: `Flush Out - Tri-Leg Release Pair #${unitNo} exceeded daily limit (${dailyCLimit}/day) [${account.account_type}]`,
-          created_at: eventTime,
-        });
-      } else if (unitNo % gcEvery === 0) {
-        await insertLedger({
-          user_id: userId,
-          amount: 1,
-          type: 'gc',
-          status: 'active',
-          note: `Tri-Leg Release GC (5th)${rFrom} [${maLbl}${unitNote}; ${srcLbl}] - ${account.account_type} | Pair #${unitNo}`,
-          created_at: eventTime,
-        });
+      const pairNo = existingAbCount + abReleasedNow + 1;
+      if (pairNo % gcEvery === 0) {
+        ledgerId = await insertLedger({user_id:userId,amount:1,type:'gc',status:'active',
+          note:`A+B Pair GC (5th) - Pair #${pairNo} (${nowTime})${fromNote} [${account.account_type}]`,created_at:eventTime});
       } else {
-        await insertLedger({
-          user_id: userId,
-          amount: triPremiumAmt,
-          tax_deducted: 0,
-          type: 'cash',
-          status: 'active',
-          note: `Tri-Leg Release Bonus${rFrom} [${maLbl}${unitNote}; ${srcLbl}] - ${account.account_type} | Pair #${unitNo} | P${triPremiumAmt}`,
-          created_at: eventTime,
-        });
-        await addToWallet(userId, triPremiumAmt);
+        ledgerId = await insertLedger({user_id:userId,amount:bpAmount,type:'cash',status:'released',
+          note:`A+B Pair #${pairNo} Released (P${bpAmount}) (${nowTime})${fromNote} [${account.account_type}]`,created_at:eventTime});
+        await addToWallet(userId,bpAmount);
       }
-      triUnitsInserted++;
+      abReleasedNow++;
     }
-    rPts--;
-    triReleasedNow++;
+    left.ab_consumed++; center.ab_consumed++;
+    await exec(`UPDATE pairing_contributions SET ab_consumed=ab_consumed+1 WHERE recipient_account_id=$1 AND source_account_id=ANY($2::bigint[])`, [accountId,[left.source_account_id,center.source_account_id]]);
+    await exec(`INSERT INTO pairing_allocations(recipient_account_id,kind,left_source_account_id,center_source_account_id,ledger_ids,occurred_at)
+      VALUES($1,'AB',$2,$3,$4::jsonb,$5)`,[accountId,left.source_account_id,center.source_account_id,JSON.stringify([ledgerId]),eventTime]);
+    lPts--; cPts--;
   }
+  if (abReleasedNow+abFlushedNow) await exec('UPDATE accounts SET left_points=$1,center_points=$2 WHERE id=$3',[lPts,cPts,accountId]);
 
-  // Structural flush catch-up (e.g. A=17, B=17, C=16 with a 15/day cap).
-  while (
-    triDone + triReleasedNow + flushedC < completedAbCount &&
-    cDoneToday + triUnitsInserted >= dailyCLimit
-  ) {
-    const unitNo = existingTriUnits + triUnitsInserted + 1;
-    await insertLedger({
-      user_id: userId,
-      amount: 0,
-      type: 'cash',
-      status: 'active',
-      note: `Flush Out - Tri-Leg Release Pair #${unitNo} exceeded daily limit (${dailyCLimit}/day) [${account.account_type}]`,
-      created_at: eventTime,
-    });
-    triUnitsInserted++;
-    flushedC++;
-    if (rPts > 0) rPts--;
+  // A fresh structural trigger consists only of proven post-boundary L, C and
+  // R contributions. Prior historical pairing_count belongs to the separate
+  // legacy cohort, not an offset into the new sources.
+  const cap = Math.min(legRows('L').length, legRows('C').length,
+    legRows('R').reduce((sum,x)=>sum+Number(x.right_points),0));
+  let trackedDone = legRows('R').reduce((sum,x)=>sum+Number(x.right_consumed),0);
+  if (availableR>0 && trackedDone + availableR > cap) {
+    const preBoundary = await scalar<boolean>(`SELECT a.created_at < m.started_at FROM accounts a CROSS JOIN pairing_tracking_meta m WHERE a.id=$1 AND m.id=1`,[accountId]);
+    if (preBoundary) await exec(`INSERT INTO pairing_review(account_id,reason)
+      VALUES($1,'New right-leg points may rely on legacy A/B structural history; verify before using pre-migration sources.')
+      ON CONFLICT(account_id) DO NOTHING`,[accountId]);
   }
-
-  if (triReleasedNow + flushedC > 0) {
-    await exec('UPDATE accounts SET right_points = $1, pairing_count = pairing_count + $2 WHERE id = $3', [
-      Math.max(0, rPts),
-      triReleasedNow + flushedC,
-      Number(accountId),
-    ]);
+  const existingTriUnits = Number((await scalar<string>(`SELECT COUNT(*) FROM ledger WHERE user_id=$1 AND note LIKE '%Tri-Leg Release%'`, [userId])) ?? 0);
+  const cDoneToday = Number((await scalar<string>(`SELECT COUNT(*) FROM ledger WHERE user_id=$1 AND note LIKE '%Tri-Leg Release%' AND created_at >= $2 AND created_at < $3`, [userId,dayStart,dayEnd])) ?? 0);
+  let unitsInserted = 0, consumedNow = 0;
+  while (trackedDone < cap) {
+    const right = legRows('R').find(x => remainingR(x)>0);
+    if (!right) break;
+    const sourceNameNow = (await userById(Number(right.source_user_id)))?.username ?? '';
+    const rFrom = sourceNameNow ? ` (from: @${sourceNameNow})` : '';
+    const srcStar = isStarRank(right.source_rank);
+    const srcLbl = srcStar ? 'StarPremium Source' : 'Premium Source';
+    const maLbl = isStar ? 'StarPremium' : 'Premium';
+    const unitCount = isStar && srcStar ? 2 : 1;
+    const ledgerIds: number[] = [];
+    for (let unitI=1;unitI<=unitCount;unitI++) {
+      const unitNo=existingTriUnits+unitsInserted+1;
+      const unitNote=unitCount>1 ? ` Unit ${unitI}/${unitCount}` : '';
+      let ledgerId: number;
+      if (cDoneToday+unitsInserted>=dailyCLimit) {
+        ledgerId=await insertLedger({user_id:userId,amount:0,type:'cash',status:'active',
+          note:`Flush Out - Tri-Leg Release Pair #${unitNo} exceeded daily limit (${dailyCLimit}/day)${rFrom} [${account.account_type}]`,created_at:eventTime});
+      } else if (unitNo % gcEvery===0) {
+        ledgerId=await insertLedger({user_id:userId,amount:1,type:'gc',status:'active',
+          note:`Tri-Leg Release GC (5th)${rFrom} [${maLbl}${unitNote}; ${srcLbl}] - ${account.account_type} | Pair #${unitNo}`,created_at:eventTime});
+      } else {
+        ledgerId=await insertLedger({user_id:userId,amount:triPremiumAmt,type:'cash',status:'active',
+          note:`Tri-Leg Release Bonus${rFrom} [${maLbl}${unitNote}; ${srcLbl}] - ${account.account_type} | Pair #${unitNo} | P${triPremiumAmt}`,created_at:eventTime});
+        await addToWallet(userId,triPremiumAmt);
+      }
+      ledgerIds.push(ledgerId); unitsInserted++;
+    }
+    right.right_consumed++;
+    await exec(`UPDATE pairing_contributions SET right_consumed=right_consumed+1 WHERE recipient_account_id=$1 AND source_account_id=$2`,[accountId,right.source_account_id]);
+    await exec(`INSERT INTO pairing_allocations(recipient_account_id,kind,right_source_account_id,ledger_ids,occurred_at)
+      VALUES($1,'TRI',$2,$3::jsonb,$4)`,[accountId,right.source_account_id,JSON.stringify(ledgerIds),eventTime]);
+    trackedDone++; consumedNow++; rPts--;
   }
+  if (consumedNow) await exec('UPDATE accounts SET right_points=$1,pairing_count=pairing_count+$2 WHERE id=$3',[rPts,consumedNow,accountId]);
 }
 
-async function freshPairingCount(accountId: number): Promise<number> {
-  return Number((await scalar<number>('SELECT pairing_count FROM accounts WHERE id = $1', [accountId])) ?? 0);
-}
-
-/** Re-evaluate an account and, when it is a CA gate, its parent MA + siblings. */
 export async function evaluatePairsCascade(accountId: number, sourceUserId = 0): Promise<void> {
   await evaluatePairs(Number(accountId), sourceUserId);
   const row = await accountById(Number(accountId));

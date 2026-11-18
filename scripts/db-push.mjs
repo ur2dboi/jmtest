@@ -37,8 +37,9 @@ try {
   if (fresh) {
     console.log('⚠️  --fresh: dropping MLM tables…');
     await client.query(`
-      DROP TABLE IF EXISTS rebuild_state, audit_logs, orders, ledger, pins,
-        packages, accounts, settings, users CASCADE;
+      DROP TABLE IF EXISTS pairing_allocations, pairing_contributions, pairing_tracking_meta,
+        pairing_review, commission_event_targets, commission_review,
+        rebuild_state, audit_logs, orders, ledger, pins, packages, accounts, settings, users CASCADE;
     `);
   }
 

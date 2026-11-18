@@ -1,4 +1,4 @@
-import { exec, q } from './db';
+import { exec, q, tx, inTransaction } from './db';
 
 /**
  * Port of MLM_Settings_Cache (plugin v9.6.109).
@@ -83,7 +83,8 @@ let schemaUpgraded = false;
  */
 export async function ensureSchemaUpgrades(): Promise<void> {
   if (schemaUpgraded) return;
-  try {
+  const alreadyInTransaction = inTransaction();
+  await tx(async () => {
     // FLOATING Commission (LP) monthly reset stores 'forfeited' ledger rows.
     await exec(`
       DO $$
@@ -95,10 +96,87 @@ export async function ensureSchemaUpgrades(): Promise<void> {
           CHECK (status IN ('active','hang','released','forfeited'));
       END $$;
     `);
-    schemaUpgraded = true;
-  } catch {
-    /* leave flag unset: retried on a later request */
-  }
+    await exec(`ALTER TABLE pins ADD COLUMN IF NOT EXISTS commission_tracked BOOLEAN NOT NULL DEFAULT FALSE`);
+    await exec(`ALTER TABLE pins ADD COLUMN IF NOT EXISTS commission_snapshot JSONB`);
+    await exec(`ALTER TABLE ledger ADD COLUMN IF NOT EXISTS source_product_pin_id BIGINT`);
+    await exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_product_source_user ON ledger(source_product_pin_id,user_id) WHERE source_product_pin_id IS NOT NULL`);
+    await exec(`CREATE TABLE IF NOT EXISTS commission_review (
+      id BIGSERIAL PRIMARY KEY,
+      pin_id BIGINT NOT NULL,
+      beneficiary_id BIGINT NOT NULL,
+      noted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reason TEXT NOT NULL,
+      UNIQUE(pin_id,beneficiary_id)
+    )`);
+    await exec(`CREATE TABLE IF NOT EXISTS commission_event_targets (
+      pin_id BIGINT NOT NULL,
+      recipient_id BIGINT NOT NULL,
+      PRIMARY KEY(pin_id,recipient_id)
+    )`);
+    await exec(`CREATE INDEX IF NOT EXISTS idx_commission_target_recipient ON commission_event_targets(recipient_id,pin_id)`);
+    await exec(`CREATE TABLE IF NOT EXISTS pairing_tracking_meta (
+      id SMALLINT PRIMARY KEY CHECK(id=1), started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    await exec(`INSERT INTO pairing_tracking_meta(id) VALUES(1) ON CONFLICT(id) DO NOTHING`);
+    await exec(`CREATE TABLE IF NOT EXISTS pairing_contributions (
+      recipient_account_id BIGINT NOT NULL, source_account_id BIGINT NOT NULL,
+      source_user_id BIGINT NOT NULL, leg VARCHAR(1) NOT NULL,
+      source_rank TEXT NOT NULL, ab_points INTEGER NOT NULL, right_points INTEGER NOT NULL,
+      occurred_at TIMESTAMPTZ NOT NULL,
+      ab_consumed INTEGER NOT NULL DEFAULT 0, right_consumed INTEGER NOT NULL DEFAULT 0,
+      review_required BOOLEAN NOT NULL DEFAULT FALSE,
+      PRIMARY KEY(recipient_account_id,source_account_id)
+    )`);
+    await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS ab_consumed INTEGER NOT NULL DEFAULT 0`);
+    await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS right_consumed INTEGER NOT NULL DEFAULT 0`);
+    await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS review_required BOOLEAN NOT NULL DEFAULT FALSE`);
+    await exec(`CREATE INDEX IF NOT EXISTS idx_pair_contribution_leg ON pairing_contributions(recipient_account_id,leg,occurred_at,source_account_id)`);
+    await exec(`CREATE TABLE IF NOT EXISTS pairing_allocations (
+      id BIGSERIAL PRIMARY KEY, recipient_account_id BIGINT NOT NULL, kind TEXT NOT NULL,
+      left_source_account_id BIGINT, center_source_account_id BIGINT, right_source_account_id BIGINT,
+      ledger_ids JSONB NOT NULL, occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    await exec(`CREATE INDEX IF NOT EXISTS idx_pair_alloc_recipient ON pairing_allocations(recipient_account_id,kind,id)`);
+    await exec(`CREATE TABLE IF NOT EXISTS pairing_review (
+      id BIGSERIAL PRIMARY KEY,
+      account_id BIGINT NOT NULL UNIQUE,
+      reason TEXT NOT NULL,
+      noted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    // Surface pre-migration waiting balances immediately. Do not mislabel new
+    // source-linked units: subtract each recipient's recorded remaining units.
+    await exec(`INSERT INTO pairing_review(account_id,reason)
+      SELECT a.id,'Legacy pairing points lack immutable source records; held for review while new verified points are processed separately.'
+      FROM accounts a CROSS JOIN pairing_tracking_meta m
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(CASE WHEN c.leg='L' THEN c.ab_points-c.ab_consumed ELSE 0 END),0) l,
+               COALESCE(SUM(CASE WHEN c.leg='C' THEN c.ab_points-c.ab_consumed ELSE 0 END),0) c,
+               COALESCE(SUM(CASE WHEN c.leg='R' THEN c.right_points-c.right_consumed ELSE 0 END),0) r
+        FROM pairing_contributions c WHERE c.recipient_account_id=a.id
+      ) tracked ON TRUE
+      WHERE m.id=1 AND a.account_type='MA' AND a.created_at<m.started_at
+        AND (a.left_points>tracked.l OR a.center_points>tracked.c OR a.right_points>tracked.r)
+      ON CONFLICT(account_id) DO NOTHING`);
+    // Supabase's public-schema defaults can grant anon/authenticated full
+    // access to newly created tables. Revoke before this transaction commits,
+    // so financial metadata is never exposed between creation and protection.
+    await exec(`DO $$
+      DECLARE role_name text;
+      BEGIN
+        REVOKE ALL ON TABLE public.commission_review, public.commission_event_targets,
+          public.pairing_tracking_meta, public.pairing_contributions,
+          public.pairing_allocations, public.pairing_review FROM PUBLIC;
+        REVOKE ALL ON SEQUENCE public.commission_review_id_seq,
+          public.pairing_allocations_id_seq, public.pairing_review_id_seq FROM PUBLIC;
+        FOR role_name IN SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated') LOOP
+          EXECUTE format('REVOKE ALL ON TABLE public.commission_review, public.commission_event_targets, public.pairing_tracking_meta, public.pairing_contributions, public.pairing_allocations, public.pairing_review FROM %I', role_name);
+          EXECUTE format('REVOKE ALL ON SEQUENCE public.commission_review_id_seq, public.pairing_allocations_id_seq, public.pairing_review_id_seq FROM %I', role_name);
+        END LOOP;
+      END $$`);
+  });
+  // A nested migration can still be rolled back by its caller; never memoize it
+  // as committed until a standalone transaction has completed successfully.
+  if (!alreadyInTransaction) schemaUpgraded = true;
 }
 
 export async function ensureSettings(force = false): Promise<Record<string, string>> {

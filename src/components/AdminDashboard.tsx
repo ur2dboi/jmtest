@@ -40,6 +40,8 @@ export interface AdminProps {
   encashReportData: { rows: (Record<string, unknown> & { username: string; gross: number; fees: number; net: number; note: string })[]; totalNet: number };
   unilevelReport: UnilevelReport;
   productCommReport: ProductCommReport;
+  commissionReview: { id: number; beneficiary: string; buyer: string; code: string; used_at: string | null; reason: string }[];
+  pairingReview: { id: number; username: string; account_id: string; noted_at: string; reason: string }[];
   salesStart: string; salesEnd: string; encashStart: string; encashEnd: string;
   treeTarget: string;
   treeRoot: TreeCell | null;
@@ -173,7 +175,7 @@ export default function AdminDashboard(props: AdminProps) {
         {tab === 'tab-encashment-report' && <EncashReportTab {...props} go={go} />}
         {tab === 'tab-payables-report' && <PayablesTab overview={props.overview} />}
         {tab === 'tab-unilevel' && <UnilevelAdminTab report={props.unilevelReport} post={post} busy={busy} />}
-        {tab === 'tab-prodcomm' && <ProductCommAdminTab report={props.productCommReport} post={post} busy={busy} />}
+        {tab === 'tab-prodcomm' && <ProductCommAdminTab report={props.productCommReport} review={props.commissionReview} pairingReview={props.pairingReview} post={post} busy={busy} />}
         {tab === 'tab-tree' && <TreeTabAdmin {...props} />}
         {tab === 'tab-logs' && <LogsTab {...props} post={post} busy={busy} />}
         {tab === 'tab-settings' && <SettingsTab {...props} post={post} busy={busy} />}
@@ -1242,7 +1244,7 @@ function UnilevelAdminTab({ report, post, busy }: { report: UnilevelReport; post
 }
 
 /* ============================ PRODUCT COMMISSION (ADMIN) ============================ */
-function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport; post: PostFn; busy: boolean }) {
+function ProductCommAdminTab({ report, review, pairingReview, post, busy }: { report: ProductCommReport; review: AdminProps['commissionReview']; pairingReview: AdminProps['pairingReview']; post: PostFn; busy: boolean }) {
   const r = report;
   return (
     <div className="animate-fadeIn space-y-4">
@@ -1251,6 +1253,27 @@ function ProductCommAdminTab({ report, post, busy }: { report: ProductCommReport
         <Stat label="FLOATING Commission (LP)" value={<span className="text-amber-300">{peso(r.pending)}</span>} />
         <Stat label="Starter Bottles Credited" value={String(r.bottles)} sub={`At ${peso(r.perBottle)} per bottle`} />
         <Stat label="Members Earning" value={String(r.earners)} />
+      </div>
+
+      <div className="card border-amber-700">
+        <h3 className="text-[15px] font-bold text-amber-300">Legacy commission review</h3>
+        <p className="text-[12px] text-zinc-400">These activations have uncertain payout provenance or allocation. Check records or a backup before any adjustment; a listing does not prove money is owed. Showing latest 200.</p>
+        <a className="btn btn-sm mt-2" href="/api/admin/export?report=commission_review">Download all commission reviews (CSV)</a>
+        <div className="tbl-wrap mt-2"><table className="tbl">
+          <thead><tr><th>Potential recipient</th><th>Activator</th><th>Code</th><th>Activated</th><th>Reason</th></tr></thead>
+          <tbody>{review.length === 0 ? <tr><td colSpan={5}>No flagged activations.</td></tr> : review.map(row =>
+            <tr key={row.id}><td>@{row.beneficiary}</td><td>@{row.buyer}</td><td>{row.code}</td><td>{dt(row.used_at)}</td><td>{row.reason}</td></tr>)}</tbody>
+        </table></div>
+      </div>
+
+      <div className="card border-amber-700">
+        <h3 className="text-[15px] font-bold text-amber-300">Pairing source review</h3>
+        <p className="text-[12px] text-zinc-400">Legacy points or structural history need review. Existing earnings are unchanged; newly verified contributions may still earn. Showing latest 200.</p>
+        <a className="btn btn-sm mt-2" href="/api/admin/export?report=pairing_review">Download all pairing reviews (CSV)</a>
+        <div className="tbl-wrap mt-2"><table className="tbl"><thead><tr><th>Member</th><th>Account</th><th>Flagged</th><th>Reason</th></tr></thead>
+          <tbody>{pairingReview.length===0 ? <tr><td colSpan={4}>No pairing reviews.</td></tr> : pairingReview.map(row =>
+            <tr key={row.id}><td>@{row.username}</td><td>{row.account_id}</td><td>{dt(row.noted_at)}</td><td>{row.reason}</td></tr>)}</tbody>
+        </table></div>
       </div>
 
       <div className="card">
@@ -1318,7 +1341,6 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
   const set = (k: string, val: string) => setF((s) => ({ ...s, [k]: val }));
   const [rebuildMsg, setRebuildMsg] = React.useState(props.rebuildState.message || 'Ready.');
   const [rebuildPct, setRebuildPct] = React.useState(0);
-  const [wipeText, setWipeText] = React.useState('');
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [restoreText, setRestoreText] = React.useState('');
 
@@ -1483,22 +1505,9 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
           </div>
         </div>
 
-        {/* Batch rebuild */}
-        <p className="mt-4 text-[12px] text-zinc-400">
-          <strong className="text-emerald-400">Batch Earnings Rebuild:</strong> wipes and replays ALL engine earnings from the network structure — A+B Pairs, Tri-Leg Releases, Flush Outs, <strong>GC awards</strong>, Direct Referral bonuses (direct sponsor only), then resyncs every wallet balance exactly to the ledger. <strong>Unilevel commissions are rebuilt from used product activations using the current dynamic compression + LP eligibility rules.</strong> Encashment history is preserved. Runs in batches to avoid slow/frozen page loading.
-        </p>
-        <div className="mt-2 rounded-lg border border-line bg-[#0a0a0a] p-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="btn !bg-emerald-700 font-semibold text-white hover:!bg-emerald-600" onClick={runBatch}>🔄 Start Batch Recalculate</button>
-            <button type="button" disabled={props.busy} className="btn-dark btn-sm" onClick={async () => { if (confirmDialog('Run the one-shot FULL rebuild now? (Fine for small networks.)')) { const r = await props.post({ action: 'rebuild-full' }); setRebuildMsg(r.message || 'Full rebuild complete.'); } }}>
-              One-shot Full Rebuild
-            </button>
-            <span className="text-[12px] text-zinc-400">{rebuildMsg}</span>
-          </div>
-          <div className="mt-2 h-3 overflow-hidden rounded-full border border-line bg-black">
-            <div className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all" style={{ width: `${rebuildPct}%` }} />
-          </div>
-          <p className="mt-1 text-[11px] text-zinc-500">This may take several minutes on a large network. Keep this tab open until complete.</p>
+        {/* Destructive full rebuild is unavailable while earnings provenance is reviewed. */}
+        <div className="mt-4 rounded-lg border border-amber-800 bg-[#0a0a0a] p-3 text-[12px] text-amber-200">
+          Full and batch earnings rebuilds are temporarily disabled because they can overwrite existing earnings. Automatic verified 5-LP catch-up remains enabled. Review ambiguous entries in Product Commission.
         </div>
       </div>
 
@@ -1524,20 +1533,9 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
         </div>
       </div>
 
-      {/* Danger zone */}
       <div className="card" style={{ borderColor: '#7f1d1d' }}>
-        <h3 className="text-[15px] font-bold text-red-400">⚠️ Danger Zone: System Wipes</h3>
-        <div className="mt-3 flex flex-wrap items-end gap-3">
-          <button type="button" disabled={props.busy} className="btn-danger" onClick={async () => { if (confirmDialog('WARNING: This will zero out ghost left/center/right points across the network. Proceed?')) await props.post({ action: 'wipe-points' }); }}>
-            Wipe Ghost Points
-          </button>
-          <div className="flex items-end gap-2">
-            <div><span className="lbl">Type WIPE to confirm</span><input className="input !w-[140px]" value={wipeText} onChange={(e) => setWipeText(e.target.value)} placeholder="WIPE" /></div>
-            <button type="button" disabled={props.busy || wipeText !== 'WIPE'} className="btn !bg-red-800 font-semibold text-white hover:!bg-red-700 disabled:opacity-40" onClick={async () => { if (confirmDialog('CRITICAL WARNING: This deletes ALL ledger entries, earnings, wallet balances, orders/sales, used/pending pins, and resets pairing points. THIS CANNOT BE UNDONE. Proceed?')) await props.post({ action: 'wipe-ledger', confirm: wipeText }); }}>
-              Total Financial Wipe
-            </button>
-          </div>
-        </div>
+        <h3 className="text-[15px] font-bold text-red-400">Financial protections</h3>
+        <p className="mt-1 text-[12px] text-zinc-400">Point and financial wipes are unavailable to protect earnings and source records.</p>
       </div>
     </div>
   );

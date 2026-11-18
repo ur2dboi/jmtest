@@ -3,6 +3,9 @@ import { settingInt } from '../settings';
 import type { AccountRow, Placement, PlacementCheck, Position } from '../types';
 import {
   accountById,
+  freeCanCountForUplinePairing,
+  getUserRankAt,
+  parseRankHistory,
   isAccountDescendant,
   isCA,
   isMA,
@@ -453,28 +456,51 @@ export async function rSlotLabel(parentAccountId: number, position: string): Pro
   return `R${rNum}`;
 }
 
-/** Qualifying (non-Starter) downline count under a leg, excluding the leg root. */
-export async function legQualifyingDownlineCount(accountId: number, leg: Position): Promise<number> {
-  const directId = await scalar<number>('SELECT id FROM accounts WHERE upline_id = $1 AND position = $2 LIMIT 1', [
-    Number(accountId),
-    leg,
-  ]);
-  if (!directId) return 0;
+/** Pairing contributions eligible for the recipient at their event time.
+ * A later rank upgrade must not retroactively make an old placement eligible.
+ * The leg root is structural only, as in point upflow.
+ */
+export async function qualifyingLegSources(accountId: number, leg: Position, asOf = new Date()): Promise<{ id: number; username: string; rank: string; when: Date }[]> {
+  const recipient = await accountById(Number(accountId));
+  if (!recipient) return [];
+  const directId = await scalar<number>('SELECT id FROM accounts WHERE upline_id = $1 AND position = $2 LIMIT 1', [Number(accountId), leg]);
+  if (!directId) return [];
   const levels = await subtreeByDepth(Number(directId), 50);
-  const ids: number[] = [];
-  for (const [depth, atDepth] of Object.entries(levels)) {
-    if (Number(depth) === 0) continue; // the leg root itself never counts
-    ids.push(...atDepth);
+  const ids = Object.entries(levels).filter(([depth]) => Number(depth) > 0).flatMap(([, nodes]) => nodes);
+  if (!ids.length) return [];
+  const rows = await q<{ id: number; user_id: number; account_type: string; created_at: Date }>(
+    'SELECT id, user_id, account_type, created_at FROM accounts WHERE id = ANY($1::bigint[])', [ids],
+  );
+  const sources: { id: number; username: string; rank: string; when: Date }[] = [];
+  for (const row of rows) {
+    if (Number(row.user_id) === Number(recipient.user_id)) continue;
+    const user = await userById(Number(row.user_id));
+    if (!user || !(await freeCanCountForUplinePairing(user))) continue;
+    let when = new Date(row.created_at);
+    if (!Number.isFinite(when.getTime())) continue;
+    let rank = await getUserRankAt(Number(user.id), when);
+    if (isStarterRank(rank)) {
+      // Starter Child upgrades create no contribution. Mother upgrades do,
+      // at the upgrade event, not at their original Starter placement.
+      if (isCA(row.account_type)) continue;
+      const upgrade = parseRankHistory(user)
+        .filter((h) => isStarterRank(h.old_rank) && !isStarterRank(h.new_rank))
+        .sort((a, b) => new Date(a.upgraded_at).getTime() - new Date(b.upgraded_at).getTime())[0];
+      if (!upgrade) continue;
+      when = new Date(upgrade.upgraded_at);
+      rank = upgrade.new_rank;
+    }
+    if (!Number.isFinite(when.getTime()) || when > asOf || isStarterRank(rank)) continue;
+    if (isStarterRank(await getUserRankAt(Number(recipient.user_id), when))) continue;
+    sources.push({ id: Number(row.id), username: user.username, rank, when });
   }
-  if (!ids.length) return 0;
-  const rows = await q<{ user_id: number }>('SELECT user_id FROM accounts WHERE id = ANY($1::bigint[])', [ids]);
-  let count = 0;
-  for (const r of rows) {
-    const u = await userById(Number(r.user_id));
-    if (!u) continue;
-    if (!isStarterRank(u.rank || 'Premium')) count++;
-  }
-  return count;
+  // Point contributions are consumed in event order, not account-creation
+  // order: an older Starter that upgrades later must not shift past sources.
+  return sources.sort((a, b) => a.when.getTime() - b.when.getTime() || a.id - b.id);
+}
+
+export async function legQualifyingDownlineCount(accountId: number, leg: Position, asOf?: Date): Promise<number> {
+  return (await qualifyingLegSources(accountId, leg, asOf)).length;
 }
 
 /** Display-only network metric: counts every visible node under a leg. */
@@ -497,36 +523,19 @@ export async function legMetricDownlineCount(accountId: number, leg: Position): 
   return count;
 }
 
-/** Right-leg qualifying members weighted by trigger points (Premium 1, StarPremium 2). */
-export async function legRightTriggerPoints(accountId: number): Promise<number> {
-  const directId = await scalar<number>('SELECT id FROM accounts WHERE upline_id = $1 AND position = $2 LIMIT 1', [
-    Number(accountId),
-    'R',
-  ]);
-  if (!directId) return 0;
-  const levels = await subtreeByDepth(Number(directId), 50);
-  const ids: number[] = [];
-  for (const [depth, atDepth] of Object.entries(levels)) {
-    if (Number(depth) === 0) continue; // the leg root itself never counts
-    ids.push(...atDepth);
-  }
-  if (!ids.length) return 0;
-  const rows = await q<{ user_id: number }>('SELECT user_id FROM accounts WHERE id = ANY($1::bigint[])', [ids]);
-  let total = 0;
-  for (const r of rows) {
-    const u = await userById(Number(r.user_id));
-    if (!u) continue;
-    if (isStarterRank(u.rank || 'Premium')) continue;
-    total += isStarRank(u.rank) ? settingInt('mlm_sys_rpts_starpremium', 2) : settingInt('mlm_sys_rpts_premium', 1);
-  }
-  return total;
+/** Right-leg qualifying contributions weighted by their rank at contribution. */
+export async function legRightTriggerPoints(accountId: number, asOf?: Date): Promise<number> {
+  const sources = await qualifyingLegSources(accountId, 'R', asOf);
+  return sources.reduce((total, source) => total + (isStarRank(source.rank)
+    ? settingInt('mlm_sys_rpts_starpremium', 2)
+    : settingInt('mlm_sys_rpts_premium', 1)), 0);
 }
 
-export async function triLegStructuralCap(accountId: number): Promise<number> {
+export async function triLegStructuralCap(accountId: number, asOf?: Date): Promise<number> {
   return Math.min(
-    await legQualifyingDownlineCount(accountId, 'L'),
-    await legQualifyingDownlineCount(accountId, 'C'),
-    await legRightTriggerPoints(accountId),
+    await legQualifyingDownlineCount(accountId, 'L', asOf),
+    await legQualifyingDownlineCount(accountId, 'C', asOf),
+    await legRightTriggerPoints(accountId, asOf),
   );
 }
 

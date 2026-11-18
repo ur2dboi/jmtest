@@ -36,7 +36,10 @@ const { seedDatabase } = await import('../src/lib/seed');
 
 if (fresh) {
   console.log('⚠️  --fresh: truncating MLM data…');
-  await exec(`TRUNCATE TABLE ledger, orders, pins, accounts, audit_logs, users, packages RESTART IDENTITY CASCADE`);
+  await exec(`TRUNCATE TABLE pairing_allocations, pairing_contributions, pairing_tracking_meta,
+    pairing_review, commission_event_targets, commission_review,
+    ledger, orders, pins, accounts, audit_logs, users, packages RESTART IDENTITY CASCADE`);
+  await exec(`INSERT INTO pairing_tracking_meta(id) VALUES(1)`);
   await exec(`UPDATE rebuild_state SET step=0, row_offset=0, total=0, status='idle', message='' WHERE id=1`);
 }
 

@@ -1,4 +1,4 @@
-import { exec, one } from './db';
+import { exec, one, tx } from './db';
 import type { OrderRow, PackageRow } from './types';
 import { auditLog, isStarterRank, userById } from './engine/accounts';
 import { consumePin } from './engine/registration';
@@ -40,12 +40,12 @@ export async function generatePinRow(packageType: string, isProduct: boolean, pu
   throw new Error('Failed to generate a unique pin code.');
 }
 
-export async function approveOrder(
+async function approveOrderInternal(
   orderId: number,
   actor: OrderActor,
   opts: { activate?: boolean; codeType?: 'UNI' | 'PCC' } = {},
 ): Promise<{ ok: boolean; error?: string; generated?: number; activated?: number; series?: string }> {
-  const order = await one<OrderRow>('SELECT * FROM orders WHERE id = $1', [Number(orderId)]);
+  const order = await one<OrderRow>('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [Number(orderId)]);
   if (!order) return { ok: false, error: 'Order not found.' };
   if (order.status !== 'pending') return { ok: false, error: 'Order was already processed.' };
 
@@ -101,8 +101,9 @@ export async function approveOrder(
     // Other product pins stay 'unused' on plain approval: the member
     // activates from My Products and only then are commissions distributed.
     if (autoActivate) {
-      await markProductPinUsed(pinId, Number(order.user_id), 'admin');
-      await handleProductActivationUnilevel(Number(order.user_id), 1);
+      if (!(await markProductPinUsed(pinId, Number(order.user_id), 'admin'))) throw new Error('Product code was already activated.');
+      await exec('UPDATE users SET lp=lp+1 WHERE id=$1',[Number(order.user_id)]);
+      await handleProductActivationUnilevel(Number(order.user_id), 1, null, pinId);
       activated++;
     }
   }
@@ -114,8 +115,12 @@ export async function approveOrder(
   return { ok: true, generated, activated, series };
 }
 
-export async function rejectOrder(orderId: number, actor: OrderActor): Promise<{ ok: boolean; error?: string }> {
-  const order = await one<OrderRow>('SELECT * FROM orders WHERE id = $1', [Number(orderId)]);
+export async function approveOrder(orderId: number, actor: OrderActor, opts: { activate?: boolean; codeType?: 'UNI' | 'PCC' } = {}): Promise<{ ok: boolean; error?: string; generated?: number; activated?: number; series?: string }> {
+  return tx(() => approveOrderInternal(orderId, actor, opts));
+}
+
+async function rejectOrderInternal(orderId: number, actor: OrderActor): Promise<{ ok: boolean; error?: string }> {
+  const order = await one<OrderRow>('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [Number(orderId)]);
   if (!order) return { ok: false, error: 'Order not found.' };
   if (order.status !== 'pending') return { ok: false, error: 'Order was already processed.' };
   await exec(`UPDATE orders SET status='rejected' WHERE id = $1`, [order.id]);
@@ -130,6 +135,10 @@ export async function rejectOrder(orderId: number, actor: OrderActor): Promise<{
     details: { orderId: order.id },
   });
   return { ok: true };
+}
+
+export async function rejectOrder(orderId: number, actor: OrderActor): Promise<{ ok: boolean; error?: string }> {
+  return tx(() => rejectOrderInternal(orderId, actor));
 }
 
 export async function transferOrder(

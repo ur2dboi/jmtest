@@ -6,7 +6,6 @@ import { maAccountForUser, userById } from './engine/accounts';
 import { registerMember, activateCa, generatePins, placeOrder, activateProductPin, upgradeRank } from './engine/registration';
 import { requestEncashment, approveEncashment } from './engine/encash';
 import { issueMemberId } from './engine/registration';
-import { rebuildUnilevelCommissionsScope } from './engine/unilevel';
 
 /* =====================================================================
  * SEEDER — packages, admin gateway, and a demo network built by running
@@ -281,7 +280,6 @@ export async function seedDatabase(opts: SeedOptions = {}): Promise<{ ok: boolea
     }
   }
 
-  await rebuildUnilevelCommissionsScope(true);
 
   const summary = {
     members: Number((await scalar<string>('SELECT COUNT(*) FROM users WHERE is_admin = FALSE')) ?? 0),

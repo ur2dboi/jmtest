@@ -189,6 +189,21 @@ export default async function AdminDashboardPage({
       ? await q<AuditRow>('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 500')
       : await q<AuditRow>('SELECT * FROM audit_logs WHERE category=$1 ORDER BY id DESC LIMIT 500', [logCategory]);
 
+  // Ambiguous pre-source-tracking entries: review only, never auto-credit.
+  const commissionReview = await q<{id: number; beneficiary: string; buyer: string; code: string; used_at: string | null; reason: string}>(
+    `SELECT r.id, COALESCE(b.username, '[deleted]') AS beneficiary,
+            COALESCE(u.username, '[deleted]') AS buyer, COALESCE(p.pin_code, '[deleted]') AS code,
+            p.used_at::text AS used_at, r.reason
+     FROM commission_review r LEFT JOIN users b ON b.id=r.beneficiary_id
+     LEFT JOIN pins p ON p.id=r.pin_id LEFT JOIN users u ON u.id=COALESCE(p.used_by,p.purchaser_id)
+     ORDER BY r.id DESC LIMIT 200`, []);
+
+  const pairingReview = await q<{id: number; username: string; account_id: string; noted_at: string; reason: string}>(
+    `SELECT r.id, COALESCE(u.username,'[deleted]') AS username, r.account_id::text,
+            r.noted_at::text, r.reason
+     FROM pairing_review r LEFT JOIN accounts a ON a.id=r.account_id
+     LEFT JOIN users u ON u.id=a.user_id ORDER BY r.id DESC LIMIT 200`, []);
+
   // Settings values
   const settingRows = await q<{ key: string; value: string }>(`SELECT key, value FROM settings WHERE key LIKE 'mlm_%'`);
   const settingsValues: Record<string, string> = {};
@@ -214,6 +229,8 @@ export default async function AdminDashboardPage({
       encashReportData={serial(encashRep)}
       unilevelReport={serial(uniReport)}
       productCommReport={serial(prodCommReport)}
+      commissionReview={serial(commissionReview)}
+      pairingReview={serial(pairingReview)}
       salesStart={salesStart}
       salesEnd={salesEnd}
       encashStart={encashStart}

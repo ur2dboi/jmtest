@@ -106,8 +106,14 @@ CREATE TABLE IF NOT EXISTS pins (
   used_at               TIMESTAMPTZ,
   activation_source     VARCHAR(20),                 -- member | admin
   activated_by_user_id  BIGINT,
+  commission_tracked    BOOLEAN NOT NULL DEFAULT FALSE,
+  commission_snapshot   JSONB,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- CREATE TABLE IF NOT EXISTS does not extend a database created by an older release.
+ALTER TABLE pins ADD COLUMN IF NOT EXISTS commission_tracked BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pins ADD COLUMN IF NOT EXISTS commission_snapshot JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_pins_purchaser_status_product ON pins (purchaser_id, status, is_product);
 CREATE INDEX IF NOT EXISTS idx_pins_used_by                  ON pins (used_by);
@@ -127,12 +133,49 @@ CREATE TABLE IF NOT EXISTS ledger (
   type           VARCHAR(10)   NOT NULL DEFAULT 'cash' CHECK (type IN ('cash','gc','hang')),
   status         VARCHAR(10)   NOT NULL DEFAULT 'active' CHECK (status IN ('active','hang','released','forfeited')),
   note           TEXT          NOT NULL DEFAULT '',
+  source_product_pin_id BIGINT,
   created_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
+
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS source_product_pin_id BIGINT;
 
 CREATE INDEX IF NOT EXISTS idx_ledger_user_created      ON ledger (user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_ledger_user_type_status  ON ledger (user_id, type, status);
 CREATE INDEX IF NOT EXISTS idx_ledger_created           ON ledger (created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_product_source_user ON ledger (source_product_pin_id,user_id) WHERE source_product_pin_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS commission_review (
+  id BIGSERIAL PRIMARY KEY, pin_id BIGINT NOT NULL, beneficiary_id BIGINT NOT NULL,
+  noted_at TIMESTAMPTZ NOT NULL DEFAULT now(), reason TEXT NOT NULL, UNIQUE(pin_id,beneficiary_id)
+);
+CREATE TABLE IF NOT EXISTS commission_event_targets (
+  pin_id BIGINT NOT NULL, recipient_id BIGINT NOT NULL, PRIMARY KEY(pin_id,recipient_id)
+);
+CREATE INDEX IF NOT EXISTS idx_commission_target_recipient ON commission_event_targets(recipient_id,pin_id);
+CREATE TABLE IF NOT EXISTS pairing_tracking_meta (
+  id SMALLINT PRIMARY KEY CHECK (id=1), started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO pairing_tracking_meta(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS pairing_contributions (
+  recipient_account_id BIGINT NOT NULL, source_account_id BIGINT NOT NULL, source_user_id BIGINT NOT NULL,
+  leg VARCHAR(1) NOT NULL, source_rank TEXT NOT NULL, ab_points INTEGER NOT NULL, right_points INTEGER NOT NULL,
+  occurred_at TIMESTAMPTZ NOT NULL, ab_consumed INTEGER NOT NULL DEFAULT 0, right_consumed INTEGER NOT NULL DEFAULT 0,
+  review_required BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(recipient_account_id,source_account_id)
+);
+ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS ab_consumed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS right_consumed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS review_required BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_pair_contribution_leg ON pairing_contributions(recipient_account_id,leg,occurred_at,source_account_id);
+CREATE TABLE IF NOT EXISTS pairing_allocations (
+  id BIGSERIAL PRIMARY KEY, recipient_account_id BIGINT NOT NULL, kind TEXT NOT NULL,
+  left_source_account_id BIGINT, center_source_account_id BIGINT, right_source_account_id BIGINT,
+  ledger_ids JSONB NOT NULL, occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pair_alloc_recipient ON pairing_allocations(recipient_account_id,kind,id);
+CREATE TABLE IF NOT EXISTS pairing_review (
+  id BIGSERIAL PRIMARY KEY, account_id BIGINT NOT NULL UNIQUE,
+  reason TEXT NOT NULL, noted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ---------------------------------------------------------------------
 -- Orders (registration packages + retail products) (wp_mlm_orders)
