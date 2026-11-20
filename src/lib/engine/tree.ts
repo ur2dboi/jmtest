@@ -1,4 +1,4 @@
-import { exec, one, q, scalar } from '../db';
+import { exec, one, q, scalar, tx } from '../db';
 import type { AccountRow, Position, UserRow } from '../types';
 import {
   accountById,
@@ -399,7 +399,7 @@ export async function associatesForUser(userId: number): Promise<{
 
 /* ---------------------- admin network override ---------------------- */
 
-export async function moveNode(
+async function moveNodeInternal(
   accountId: number,
   newUplineId: number,
   newPosition: string,
@@ -446,6 +446,14 @@ export async function moveNode(
     details: { account: Number(acc.id), from, to: `${target}/${pos}` },
   });
   return { ok: true, detail };
+}
+
+/** Keep placement, pairing and its audit in the same transaction. */
+export async function moveNode(
+  accountId: number, newUplineId: number, newPosition: string,
+  actor: { id: number; username: string },
+): Promise<{ ok: boolean; error?: string; detail?: string }> {
+  return tx(() => moveNodeInternal(accountId, newUplineId, newPosition, actor));
 }
 
 /** Open slots under a node, with the rule hint for each leg. */

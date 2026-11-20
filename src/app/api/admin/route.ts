@@ -165,16 +165,25 @@ export async function POST(req: Request) {
     if (action === 'toggle-hold') {
       const target = await userById(Number(b.user_id));
       if (!target || Number(target.id) === 1) return fail('Invalid member.');
-      if (target.account_held) {
-        await exec('UPDATE users SET account_held=FALSE WHERE id=$1', [target.id]);
+      // The hold transition and any pairing re-evaluation must be atomic.
+      // Decide under the user row lock so concurrent toggles cannot race.
+      const unheld = await tx(async (client) => {
+        const current = await client.query<{account_held: boolean}>('SELECT account_held FROM users WHERE id=$1 FOR UPDATE',[target.id]);
+        if (!current.rowCount) throw new Error('Member not found.');
+        const wasHeld = current.rows[0].account_held;
+        await exec('UPDATE users SET account_held=$1 WHERE id=$2',[!wasHeld,target.id]);
         invalidateUser(Number(target.id));
-        const accounts = await q<{ id: number }>('SELECT id FROM accounts WHERE user_id=$1', [target.id]);
-        for (const a of accounts) await evaluatePairsCascade(Number(a.id), 0);
+        if (wasHeld) {
+          const accounts = await q<{ id: number }>('SELECT id FROM accounts WHERE user_id=$1 ORDER BY id', [target.id]);
+          for (const a of accounts) await evaluatePairsCascade(Number(a.id), 0);
+        }
+        return wasHeld;
+      });
+      if (unheld) {
+        // Global unilevel settlement remains a separate, retryable operation.
         await releaseMaturedUnilevelCommissions();
         return ok({ message: `Account @${target.username} has been UNBLOCKED. Waiting points were re-evaluated.` });
       }
-      await exec('UPDATE users SET account_held=TRUE WHERE id=$1', [target.id]);
-      invalidateUser(Number(target.id));
       return ok({ message: `Account @${target.username} has been put ON HOLD. Earnings are paused, but waiting points can still accumulate.` });
     }
 
