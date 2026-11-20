@@ -1,4 +1,4 @@
-import { exec, one, q, scalar } from '../db';
+import { exec, one, q, scalar, tx } from '../db';
 import type { LedgerRow } from '../types';
 import { settingNum } from '../settings';
 import { auditLog, memberCanEncash, memberIdStatus, money, userById, addToWallet } from './accounts';
@@ -108,11 +108,11 @@ export async function requestEncashment(input: EncashRequestInput): Promise<{ ok
   return { ok: true, quote, ledgerId };
 }
 
-export async function approveEncashment(
+async function approveEncashmentInternal(
   ledgerId: number,
   actor: { id: number; username: string },
 ): Promise<{ ok: boolean; error?: string }> {
-  const row = await one<LedgerRow>('SELECT * FROM ledger WHERE id = $1 AND amount < 0', [Number(ledgerId)]);
+  const row = await one<LedgerRow>('SELECT * FROM ledger WHERE id = $1 AND amount < 0 FOR UPDATE', [Number(ledgerId)]);
   if (!row) return { ok: false, error: 'Encashment request not found.' };
   if (!/Pending Admin Approval/i.test(row.note)) return { ok: false, error: 'This request was already processed.' };
   const note = row.note.replace(/— Pending Admin Approval/i, '— APPROVED & PAID');
@@ -129,12 +129,19 @@ export async function approveEncashment(
   return { ok: true };
 }
 
-export async function rejectEncashment(
+/** Serialize approval against rejection of the same request. */
+export async function approveEncashment(
+  ledgerId: number, actor: { id: number; username: string },
+): Promise<{ ok: boolean; error?: string }> {
+  return tx(() => approveEncashmentInternal(ledgerId,actor));
+}
+
+async function rejectEncashmentInternal(
   ledgerId: number,
   actor: { id: number; username: string },
   reason = '',
 ): Promise<{ ok: boolean; error?: string }> {
-  const row = await one<LedgerRow>('SELECT * FROM ledger WHERE id = $1 AND amount < 0', [Number(ledgerId)]);
+  const row = await one<LedgerRow>('SELECT * FROM ledger WHERE id = $1 AND amount < 0 FOR UPDATE', [Number(ledgerId)]);
   if (!row) return { ok: false, error: 'Encashment request not found.' };
   if (!/Pending Admin Approval/i.test(row.note)) return { ok: false, error: 'This request was already processed.' };
   const refund = Math.abs(Number(row.amount));
@@ -150,6 +157,13 @@ export async function rejectEncashment(
     details: { ledgerId: Number(ledgerId), refund, reason },
   });
   return { ok: true };
+}
+
+/** Reject and refund as one transaction, including the audit entry. */
+export async function rejectEncashment(
+  ledgerId: number, actor: { id: number; username: string }, reason = '',
+): Promise<{ ok: boolean; error?: string }> {
+  return tx(() => rejectEncashmentInternal(ledgerId,actor,reason));
 }
 
 export interface EncashRow extends LedgerRow {

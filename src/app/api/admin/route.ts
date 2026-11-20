@@ -190,22 +190,21 @@ export async function POST(req: Request) {
     /* ---------------- delete member(s) ---------------- */
     if (action === 'delete-member' || action === 'bulk-delete-members') {
       const ids = action === 'delete-member' ? [Number(b.user_id)] : (b.user_ids as unknown[]).map(Number);
-      let deleted = 0;
-      for (const uid of ids) {
-        if (!uid || uid === 1) continue;
-        const target = await userById(uid);
-        if (!target) continue;
-        // Cascade: Child Account users sponsored by this member
-        const caUsers = await q<{ user_id: number }>(
-          `SELECT DISTINCT user_id FROM accounts WHERE sponsor_id=$1 AND account_type='CA'`,
-          [uid],
-        );
-        for (const ca of caUsers) await deleteUserCascade(Number(ca.user_id));
-        await deleteUserCascade(uid);
-        deleted++;
-        void target;
-      }
-      await audit(actor, 'admin', action === 'delete-member' ? 'DELETE MEMBER' : 'BULK DELETE MEMBERS', { ids });
+      const deleted = await tx(async () => {
+        let count = 0;
+        for (const uid of ids) {
+          if (!uid || uid === 1) continue;
+          const target = await userById(uid);
+          if (!target) continue;
+          const caUsers = await q<{ user_id: number }>(
+            `SELECT DISTINCT user_id FROM accounts WHERE sponsor_id=$1 AND account_type='CA'`, [uid]);
+          for (const ca of caUsers) await deleteUserCascade(Number(ca.user_id));
+          await deleteUserCascade(uid);
+          count++;
+        }
+        await audit(actor, 'admin', action === 'delete-member' ? 'DELETE MEMBER' : 'BULK DELETE MEMBERS', { ids });
+        return count;
+      });
       return ok({ message: `Deleted ${deleted} member(s) and all associated Child Accounts.` });
     }
 
@@ -292,11 +291,14 @@ export async function POST(req: Request) {
     }
     if (action === 'pin-delete' || action === 'pins-bulk-delete') {
       const ids = action === 'pin-delete' ? [Number(b.pin_id)] : ((b.pin_ids as unknown[]) ?? []).map(Number);
-      let deleted = 0;
-      for (const id of ids) if (id) deleted += await exec(`DELETE FROM pins WHERE id=$1 AND status<>'used'
-        AND NOT EXISTS (SELECT 1 FROM ledger WHERE source_product_pin_id=pins.id)
-        AND NOT EXISTS (SELECT 1 FROM commission_event_targets WHERE pin_id=pins.id)`, [id]);
-      await audit(actor, 'admin', 'DELETE UNUSED PIN(S)', { ids, deleted });
+      const deleted = await tx(async () => {
+        let count = 0;
+        for (const id of ids) if (id) count += await exec(`DELETE FROM pins WHERE id=$1 AND status<>'used'
+          AND NOT EXISTS (SELECT 1 FROM ledger WHERE source_product_pin_id=pins.id)
+          AND NOT EXISTS (SELECT 1 FROM commission_event_targets WHERE pin_id=pins.id)`, [id]);
+        await audit(actor, 'admin', 'DELETE UNUSED PIN(S)', { ids, deleted:count });
+        return count;
+      });
       return ok({ message: `${deleted} unused code(s) deleted. Activated or source-linked codes are retained to protect commission history.` });
     }
     if (action === 'pin-transfer') {
