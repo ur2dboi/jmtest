@@ -13,7 +13,7 @@ BEGIN
   IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
   RETURN NEW;
 END $$;
-REVOKE ALL ON FUNCTION public.mjp_pairing_version_fence() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.mjp_pairing_version_fence() FROM PUBLIC, anon, authenticated;
 CREATE TRIGGER mjp_fence_account_insert BEFORE INSERT OR DELETE ON public.accounts
   FOR EACH ROW EXECUTE FUNCTION public.mjp_pairing_version_fence();
 CREATE TRIGGER mjp_fence_account_update BEFORE UPDATE OF upline_id,position,rank_snapshot,left_points,center_points,right_points,pairing_count ON public.accounts
