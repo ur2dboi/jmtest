@@ -23,7 +23,7 @@ export const SETTING_DEFAULTS = {
   mlm_sys_gc_every: 5,
   mlm_sys_max_depth: 8,
   mlm_sys_rpts_premium: 1,
-  mlm_sys_rpts_starpremium: 2,
+  mlm_sys_rpts_starpremium: 1,
   mlm_sys_tax: 10,
   mlm_sys_fee: 20,
   mlm_sys_fund_transfer_fee: 25,
@@ -131,12 +131,24 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS right_consumed INTEGER NOT NULL DEFAULT 0`);
     await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS review_required BOOLEAN NOT NULL DEFAULT FALSE`);
     await exec(`CREATE INDEX IF NOT EXISTS idx_pair_contribution_leg ON pairing_contributions(recipient_account_id,leg,occurred_at,source_account_id)`);
+    // A rank upgrade is a distinct time-stamped event, not a mutation of the
+    // original source. One Premium-to-Star differential per source/recipient.
+    await exec(`CREATE TABLE IF NOT EXISTS pairing_upgrade_contributions (
+      recipient_account_id BIGINT NOT NULL, source_account_id BIGINT NOT NULL,
+      source_user_id BIGINT NOT NULL, leg VARCHAR(1) NOT NULL CHECK (leg IN ('L','C')),
+      ab_points INTEGER NOT NULL CHECK (ab_points=2), ab_consumed INTEGER NOT NULL DEFAULT 0 CHECK (ab_consumed BETWEEN 0 AND ab_points),
+      occurred_at TIMESTAMPTZ NOT NULL, review_required BOOLEAN NOT NULL DEFAULT FALSE,
+      PRIMARY KEY(recipient_account_id,source_account_id)
+    )`);
+    await exec(`CREATE INDEX IF NOT EXISTS idx_pair_upgrade_leg ON pairing_upgrade_contributions(recipient_account_id,leg,occurred_at,source_account_id)`);
     await exec(`CREATE TABLE IF NOT EXISTS pairing_allocations (
       id BIGSERIAL PRIMARY KEY, recipient_account_id BIGINT NOT NULL, kind TEXT NOT NULL,
       left_source_account_id BIGINT, center_source_account_id BIGINT, right_source_account_id BIGINT,
       ledger_ids JSONB NOT NULL, occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
     await exec(`CREATE INDEX IF NOT EXISTS idx_pair_alloc_recipient ON pairing_allocations(recipient_account_id,kind,id)`);
+    await exec(`ALTER TABLE pairing_allocations ADD COLUMN IF NOT EXISTS left_event_kind TEXT NOT NULL DEFAULT 'base'`);
+    await exec(`ALTER TABLE pairing_allocations ADD COLUMN IF NOT EXISTS center_event_kind TEXT NOT NULL DEFAULT 'base'`);
     await exec(`CREATE TABLE IF NOT EXISTS pairing_review (
       id BIGSERIAL PRIMARY KEY,
       account_id BIGINT NOT NULL UNIQUE,
@@ -152,9 +164,12 @@ export async function ensureSchemaUpgrades(): Promise<void> {
         SELECT COALESCE(SUM(CASE WHEN c.leg='L' THEN c.ab_points-c.ab_consumed ELSE 0 END),0) l,
                COALESCE(SUM(CASE WHEN c.leg='C' THEN c.ab_points-c.ab_consumed ELSE 0 END),0) c,
                COALESCE(SUM(CASE WHEN c.leg='R' THEN c.right_points-c.right_consumed ELSE 0 END),0) r
-        FROM pairing_contributions c WHERE c.recipient_account_id=a.id
+        FROM (
+          SELECT leg, ab_points, ab_consumed, right_points, right_consumed, recipient_account_id FROM pairing_contributions
+          UNION ALL SELECT leg, ab_points, ab_consumed, 0 AS right_points, 0 AS right_consumed, recipient_account_id FROM pairing_upgrade_contributions
+        ) c WHERE c.recipient_account_id=a.id
       ) tracked ON TRUE
-      WHERE m.id=1 AND a.account_type='MA' AND a.created_at<m.started_at
+      WHERE m.id=1 AND a.created_at<m.started_at
         AND (a.left_points>tracked.l OR a.center_points>tracked.c OR a.right_points>tracked.r)
       ON CONFLICT(account_id) DO NOTHING`);
     // Supabase's public-schema defaults can grant anon/authenticated full
@@ -165,11 +180,11 @@ export async function ensureSchemaUpgrades(): Promise<void> {
       BEGIN
         REVOKE ALL ON TABLE public.commission_review, public.commission_event_targets,
           public.pairing_tracking_meta, public.pairing_contributions,
-          public.pairing_allocations, public.pairing_review FROM PUBLIC;
+          public.pairing_allocations, public.pairing_review, public.pairing_upgrade_contributions FROM PUBLIC;
         REVOKE ALL ON SEQUENCE public.commission_review_id_seq,
           public.pairing_allocations_id_seq, public.pairing_review_id_seq FROM PUBLIC;
         FOR role_name IN SELECT rolname FROM pg_roles WHERE rolname IN ('anon','authenticated') LOOP
-          EXECUTE format('REVOKE ALL ON TABLE public.commission_review, public.commission_event_targets, public.pairing_tracking_meta, public.pairing_contributions, public.pairing_allocations, public.pairing_review FROM %I', role_name);
+          EXECUTE format('REVOKE ALL ON TABLE public.commission_review, public.commission_event_targets, public.pairing_tracking_meta, public.pairing_contributions, public.pairing_allocations, public.pairing_review, public.pairing_upgrade_contributions FROM %I', role_name);
           EXECUTE format('REVOKE ALL ON SEQUENCE public.commission_review_id_seq, public.pairing_allocations_id_seq, public.pairing_review_id_seq FROM %I', role_name);
         END LOOP;
       END $$`);

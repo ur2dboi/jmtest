@@ -166,12 +166,22 @@ ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS ab_consumed INTEGER N
 ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS right_consumed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS review_required BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_pair_contribution_leg ON pairing_contributions(recipient_account_id,leg,occurred_at,source_account_id);
+CREATE TABLE IF NOT EXISTS pairing_upgrade_contributions (
+  recipient_account_id BIGINT NOT NULL, source_account_id BIGINT NOT NULL, source_user_id BIGINT NOT NULL,
+  leg VARCHAR(1) NOT NULL CHECK (leg IN ('L','C')), ab_points INTEGER NOT NULL CHECK (ab_points=2),
+  ab_consumed INTEGER NOT NULL DEFAULT 0 CHECK (ab_consumed BETWEEN 0 AND ab_points),
+  occurred_at TIMESTAMPTZ NOT NULL, review_required BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY(recipient_account_id,source_account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pair_upgrade_leg ON pairing_upgrade_contributions(recipient_account_id,leg,occurred_at,source_account_id);
 CREATE TABLE IF NOT EXISTS pairing_allocations (
   id BIGSERIAL PRIMARY KEY, recipient_account_id BIGINT NOT NULL, kind TEXT NOT NULL,
   left_source_account_id BIGINT, center_source_account_id BIGINT, right_source_account_id BIGINT,
   ledger_ids JSONB NOT NULL, occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_pair_alloc_recipient ON pairing_allocations(recipient_account_id,kind,id);
+ALTER TABLE pairing_allocations ADD COLUMN IF NOT EXISTS left_event_kind TEXT NOT NULL DEFAULT 'base';
+ALTER TABLE pairing_allocations ADD COLUMN IF NOT EXISTS center_event_kind TEXT NOT NULL DEFAULT 'base';
 CREATE TABLE IF NOT EXISTS pairing_review (
   id BIGSERIAL PRIMARY KEY, account_id BIGINT NOT NULL UNIQUE,
   reason TEXT NOT NULL, noted_at TIMESTAMPTZ NOT NULL DEFAULT now()

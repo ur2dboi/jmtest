@@ -526,9 +526,7 @@ export async function legMetricDownlineCount(accountId: number, leg: Position): 
 /** Right-leg qualifying contributions weighted by their rank at contribution. */
 export async function legRightTriggerPoints(accountId: number, asOf?: Date): Promise<number> {
   const sources = await qualifyingLegSources(accountId, 'R', asOf);
-  return sources.reduce((total, source) => total + (isStarRank(source.rank)
-    ? settingInt('mlm_sys_rpts_starpremium', 2)
-    : settingInt('mlm_sys_rpts_premium', 1)), 0);
+  return sources.length; // One Right trigger per member, irrespective of rank.
 }
 
 export async function triLegStructuralCap(accountId: number, asOf?: Date): Promise<number> {

@@ -164,10 +164,9 @@ async function processPointUpflowInternal(
   if (isStarterRank(rank)) return; // Starter: no points at all
 
   const pointsToAdd = isStarRank(rank) ? 3 : 1;
-  // Right-leg trigger points per member: Premium = 1, StarPremium = 2 (settings-driven).
-  const rPointsToAdd = isStarRank(rank)
-    ? settingInt('mlm_sys_rpts_starpremium', 2)
-    : settingInt('mlm_sys_rpts_premium', 1);
+  // PHP final rule: one Right trigger per qualifying source, regardless of rank.
+  // An old database setting of 2 must not resurrect duplicate triggers.
+  const rPointsToAdd = 1;
 
   let currentNodeId = nodeId;
   let safety = 0;
@@ -176,7 +175,7 @@ async function processPointUpflowInternal(
       'SELECT upline_id, position FROM accounts WHERE id = $1',
       [currentNodeId],
     );
-    if (!current || !current.upline_id) break;
+    if (!current || Number(current.upline_id) <= 0) break;
     const uplineId = Number(current.upline_id);
     const leg = current.position;
     const uplineOwnerId = Number(
@@ -184,9 +183,9 @@ async function processPointUpflowInternal(
     );
     const isDirectChild = nodeId === currentNodeId;
 
-    // An account which was Starter when this entry occurred must never
-    // accumulate pairing points for later release after it upgrades.
-    if (uplineOwnerId !== origin && !isStarterRank(await getUserRankAt(uplineOwnerId, eventTime))) {
+    // As in the supplied PHP, points can accumulate while a recipient is
+    // Starter; evaluatePairs does not pay it until it has an eligible rank.
+    if (uplineOwnerId !== origin) {
       if (!isDirectChild) {
         const column = leg === 'L' ? 'left_points' : leg === 'C' ? 'center_points' : 'right_points';
         const delta = leg === 'R' ? rPointsToAdd : pointsToAdd;
@@ -194,7 +193,7 @@ async function processPointUpflowInternal(
         // A delayed older event cannot safely spend newer contributions or be
         // backdated into a different daily capacity window.
         await one('SELECT id FROM accounts WHERE id=$1 FOR UPDATE',[uplineId]);
-        const latest = await one<{when: Date | null}>('SELECT MAX(occurred_at) AS "when" FROM pairing_contributions WHERE recipient_account_id=$1',[uplineId]);
+        const latest = await one<{when: Date | null}>('SELECT MAX(occurred_at) AS "when" FROM (SELECT occurred_at FROM pairing_contributions WHERE recipient_account_id=$1 UNION ALL SELECT occurred_at FROM pairing_upgrade_contributions WHERE recipient_account_id=$1) events',[uplineId]);
         const latestTime = latest?.when ? new Date(latest.when) : null;
         const outOfOrder = !!latestTime && latestTime.getTime()>eventTime.getTime() &&
           !(await safelyAdvancePairingTime(uplineOwnerId,eventTime,latestTime));
@@ -214,6 +213,46 @@ async function processPointUpflowInternal(
 
 export async function processPointUpflow(newNodeId: number, originUserId: number, eventTimeOverride?: Date, syncStructure = true): Promise<void> {
   return tx(() => processPointUpflowInternal(newNodeId, originUserId, eventTimeOverride, syncStructure));
+}
+
+/** Record the Premium->Star two-point L/C differential as a separate event.
+ * Never turn an existing Premium source into a second structural member. */
+export async function processUpgradeDifferential(nodeId: number, originUserId: number, eventTime: Date): Promise<void> {
+  return tx(async () => {
+    const origin = await userById(originUserId);
+    if (!origin || !(await freeFlag(origin, 'count'))) return;
+    let cursor = Number(nodeId), safety = 0;
+    while (cursor > 1 && safety++ < 500) {
+      const current = await one<{upline_id:number;position:Position}>('SELECT upline_id,position FROM accounts WHERE id=$1',[cursor]);
+      if (!current || Number(current.upline_id) <= 0) break;
+      const recipient = Number(current.upline_id);
+      const owner = Number((await scalar<number>('SELECT user_id FROM accounts WHERE id=$1',[recipient])) ?? 0);
+      const leg = current.position;
+      if (owner !== Number(originUserId) && cursor !== Number(nodeId) && (leg === 'L' || leg === 'C')) {
+        await one('SELECT id FROM accounts WHERE id=$1 FOR UPDATE',[recipient]);
+        const base = await one<{leg:Position;review_required:boolean}>(
+          'SELECT leg,review_required FROM pairing_contributions WHERE recipient_account_id=$1 AND source_account_id=$2',[recipient,nodeId]);
+        const latest = await one<{when:Date|null}>(`SELECT MAX(occurred_at) AS "when" FROM (
+          SELECT occurred_at FROM pairing_contributions WHERE recipient_account_id=$1
+          UNION ALL SELECT occurred_at FROM pairing_upgrade_contributions WHERE recipient_account_id=$1) events`,[recipient]);
+        const later = latest?.when ? new Date(latest.when) : null;
+        const outOfOrder = !!later && later.getTime()>eventTime.getTime() && !(await safelyAdvancePairingTime(owner,eventTime,later));
+        // Missing/changed base history or an order ambiguity must be reviewed,
+        // not silently credited. The aggregate points are still preserved.
+        const held = !base || base.leg !== leg || base.review_required || outOfOrder;
+        const added = await one<{source_account_id:number}>(`INSERT INTO pairing_upgrade_contributions
+          (recipient_account_id,source_account_id,source_user_id,leg,ab_points,occurred_at,review_required)
+          VALUES($1,$2,$3,$4,2,$5,$6) ON CONFLICT(recipient_account_id,source_account_id) DO NOTHING RETURNING source_account_id`,
+          [recipient,nodeId,originUserId,leg,eventTime,held]);
+        if (added) {
+          await exec(`UPDATE accounts SET ${leg === 'L' ? 'left_points' : 'center_points'} = ${leg === 'L' ? 'left_points' : 'center_points'} + 2 WHERE id=$1`,[recipient]);
+          if (held) await exec(`INSERT INTO pairing_review(account_id,reason) VALUES($1,'Upgrade differential requires review: source history or event ordering is not verifiable.') ON CONFLICT(account_id) DO NOTHING`,[recipient]);
+          await evaluatePairs(recipient,originUserId,eventTime);
+        }
+      }
+      cursor=recipient;
+    }
+  });
 }
 
 async function freeFlag(user: NonNullable<Awaited<ReturnType<typeof userById>>>, which: 'receive' | 'count' | 'dr'): Promise<boolean> {
@@ -257,7 +296,7 @@ export async function evaluatePairs(accountId: number, sourceUserId = 0, eventTi
 
 async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTimeInput?: Date): Promise<void> {
   const account = await accountById(Number(accountId));
-  if (!account || isCA(account.account_type)) return; // CAs never receive pairing or pairing GC.
+  if (!account) return; // PHP allows both Mother and Child Accounts to earn pairing.
 
   const sourceId = Number(sourceUserId);
   if (sourceId > 0) {
@@ -272,7 +311,7 @@ async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTim
   if (owner && !(await freeFlag(owner, 'receive'))) return;
 
   let eventTime = eventTimeInput ?? new Date();
-  const latest = await one<{when: Date | null}>('SELECT MAX(occurred_at) AS "when" FROM pairing_contributions WHERE recipient_account_id=$1',[accountId]);
+  const latest = await one<{when: Date | null}>('SELECT MAX(occurred_at) AS "when" FROM (SELECT occurred_at FROM pairing_contributions WHERE recipient_account_id=$1 UNION ALL SELECT occurred_at FROM pairing_upgrade_contributions WHERE recipient_account_id=$1) events',[accountId]);
   const latestTime = latest?.when ? new Date(latest.when) : null;
   if (latestTime && latestTime.getTime()>eventTime.getTime()) {
     if (!(await safelyAdvancePairingTime(userId,eventTime,latestTime))) {
@@ -306,9 +345,13 @@ async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTim
   // reconstructed from aggregate points or ledger prose. Keep them untouched,
   // flag them, and spend only point units with immutable new source records.
   type Contribution = { source_account_id: number; source_user_id: number; leg: Position; source_rank: string;
-    ab_points: number; right_points: number; ab_consumed: number; right_consumed: number; review_required: boolean; occurred_at: Date };
+    ab_points: number; right_points: number; ab_consumed: number; right_consumed: number; review_required: boolean; occurred_at: Date; event_kind: 'base'|'upgrade' };
   const contributions = await q<Contribution>(
-    `SELECT * FROM pairing_contributions WHERE recipient_account_id=$1 ORDER BY occurred_at,source_account_id`, [accountId]);
+    `SELECT source_account_id,source_user_id,leg,source_rank,ab_points,right_points,ab_consumed,right_consumed,review_required,occurred_at,'base'::text AS event_kind
+     FROM pairing_contributions WHERE recipient_account_id=$1
+     UNION ALL SELECT source_account_id,source_user_id,leg,'StarPremium',ab_points,0,ab_consumed,0,review_required,occurred_at,'upgrade'::text
+     FROM pairing_upgrade_contributions WHERE recipient_account_id=$1
+     ORDER BY occurred_at,source_account_id,event_kind`, [accountId]);
   const legRows = (leg: Position) => contributions.filter(x => x.leg === leg && !x.review_required);
   const remainingAb = (x: Contribution) => Number(x.ab_points) - Number(x.ab_consumed);
   const remainingR = (x: Contribution) => Number(x.right_points) - Number(x.right_consumed);
@@ -356,20 +399,40 @@ async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTim
       abReleasedNow++;
     }
     left.ab_consumed++; center.ab_consumed++;
-    await exec(`UPDATE pairing_contributions SET ab_consumed=ab_consumed+1 WHERE recipient_account_id=$1 AND source_account_id=ANY($2::bigint[])`, [accountId,[left.source_account_id,center.source_account_id]]);
-    await exec(`INSERT INTO pairing_allocations(recipient_account_id,kind,left_source_account_id,center_source_account_id,ledger_ids,occurred_at)
-      VALUES($1,'AB',$2,$3,$4::jsonb,$5)`,[accountId,left.source_account_id,center.source_account_id,JSON.stringify([ledgerId]),eventTime]);
+    for (const source of [left,center]) {
+      const table = source.event_kind === 'upgrade' ? 'pairing_upgrade_contributions' : 'pairing_contributions';
+      await exec(`UPDATE ${table} SET ab_consumed=ab_consumed+1 WHERE recipient_account_id=$1 AND source_account_id=$2`,[accountId,source.source_account_id]);
+    }
+    await exec(`INSERT INTO pairing_allocations(recipient_account_id,kind,left_source_account_id,center_source_account_id,ledger_ids,occurred_at,left_event_kind,center_event_kind)
+      VALUES($1,'AB',$2,$3,$4::jsonb,$5,$6,$7)`,[accountId,left.source_account_id,center.source_account_id,JSON.stringify([ledgerId]),eventTime,left.event_kind,center.event_kind]);
     lPts--; cPts--;
   }
   if (abReleasedNow+abFlushedNow) await exec('UPDATE accounts SET left_points=$1,center_points=$2 WHERE id=$3',[lPts,cPts,accountId]);
 
-  // A fresh structural trigger consists only of proven post-boundary L, C and
-  // R contributions. Prior historical pairing_count belongs to the separate
-  // legacy cohort, not an offset into the new sources.
-  const cap = Math.min(legRows('L').length, legRows('C').length,
-    legRows('R').reduce((sum,x)=>sum+Number(x.right_points),0));
-  let trackedDone = legRows('R').reduce((sum,x)=>sum+Number(x.right_consumed),0);
-  if (availableR>0 && trackedDone + availableR > cap) {
+  // One source can trigger Tri-Leg only once per recipient, even when a
+  // StarPremium source contributes two right-leg points. The source's rank
+  // and recipient's rank decide whether that single trigger emits one or two
+  // ledger units. Existing allocations remain authoritative, including old
+  // duplicate/partially consumed data: never pay that source again.
+  const rightSources = legRows('R');
+  const prior = await q<{ right_source_account_id: number }>(
+    `SELECT DISTINCT right_source_account_id FROM pairing_allocations
+     WHERE recipient_account_id=$1 AND kind='TRI' AND right_source_account_id IS NOT NULL`, [accountId]);
+  const usedSourceIds = new Set(prior.map(x => Number(x.right_source_account_id)));
+  const inconsistent = rightSources.some(x => Number(x.right_consumed)>0 && !usedSourceIds.has(Number(x.source_account_id)));
+  if (inconsistent) {
+    await exec(`INSERT INTO pairing_review(account_id,reason) VALUES($1,'A right-leg source has consumed points without a Tri-Leg allocation; preserve and investigate.') ON CONFLICT(account_id) DO NOTHING`, [accountId]);
+    return;
+  }
+  if (rightSources.some(x => usedSourceIds.has(Number(x.source_account_id)) && remainingR(x)>0)) {
+    await exec(`INSERT INTO pairing_review(account_id,reason) VALUES($1,'Previously allocated right-leg source retains points; prevent a second bonus and review its balance.')
+      ON CONFLICT(account_id) DO UPDATE SET reason=CASE WHEN pairing_review.reason LIKE '%Previously allocated right-leg source retains points%' THEN pairing_review.reason ELSE pairing_review.reason || ' Previously allocated right-leg source retains points; prevent a second bonus and review its balance.' END`,[accountId]);
+  }
+  const unusedSources = rightSources.filter(x => !usedSourceIds.has(Number(x.source_account_id)) && remainingR(x)>0);
+  // Upgrade events add points, not structural members.
+  const cap = Math.min(legRows('L').filter(x=>x.event_kind==='base').length, legRows('C').filter(x=>x.event_kind==='base').length, rightSources.length);
+  let trackedDone = rightSources.filter(x => usedSourceIds.has(Number(x.source_account_id))).length;
+  if (unusedSources.length>0 && trackedDone + unusedSources.length > cap) {
     const preBoundary = await scalar<boolean>(`SELECT a.created_at < m.started_at FROM accounts a CROSS JOIN pairing_tracking_meta m WHERE a.id=$1 AND m.id=1`,[accountId]);
     if (preBoundary) await exec(`INSERT INTO pairing_review(account_id,reason)
       VALUES($1,'New right-leg points may rely on legacy A/B structural history; verify before using pre-migration sources.')
@@ -379,7 +442,7 @@ async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTim
   const cDoneToday = Number((await scalar<string>(`SELECT COUNT(*) FROM ledger WHERE user_id=$1 AND note LIKE '%Tri-Leg Release%' AND created_at >= $2 AND created_at < $3`, [userId,dayStart,dayEnd])) ?? 0);
   let unitsInserted = 0, consumedNow = 0;
   while (trackedDone < cap) {
-    const right = legRows('R').find(x => remainingR(x)>0);
+    const right = unusedSources.find(x => !usedSourceIds.has(Number(x.source_account_id)));
     if (!right) break;
     const sourceNameNow = (await userById(Number(right.source_user_id)))?.username ?? '';
     const rFrom = sourceNameNow ? ` (from: @${sourceNameNow})` : '';
@@ -405,11 +468,13 @@ async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTim
       }
       ledgerIds.push(ledgerId); unitsInserted++;
     }
-    right.right_consumed++;
-    await exec(`UPDATE pairing_contributions SET right_consumed=right_consumed+1 WHERE recipient_account_id=$1 AND source_account_id=$2`,[accountId,right.source_account_id]);
+    const spentPoints = remainingR(right);
+    right.right_consumed += spentPoints;
+    await exec(`UPDATE pairing_contributions SET right_consumed=right_consumed+$3 WHERE recipient_account_id=$1 AND source_account_id=$2`,[accountId,right.source_account_id,spentPoints]);
+    usedSourceIds.add(Number(right.source_account_id));
     await exec(`INSERT INTO pairing_allocations(recipient_account_id,kind,right_source_account_id,ledger_ids,occurred_at)
       VALUES($1,'TRI',$2,$3::jsonb,$4)`,[accountId,right.source_account_id,JSON.stringify(ledgerIds),eventTime]);
-    trackedDone++; consumedNow++; rPts--;
+    trackedDone++; consumedNow++; rPts -= spentPoints;
   }
   if (consumedNow) await exec('UPDATE accounts SET right_points=$1,pairing_count=pairing_count+$2 WHERE id=$3',[rPts,consumedNow,accountId]);
 }

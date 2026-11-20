@@ -171,7 +171,7 @@ export default function MemberPortal(props: MemberPortalProps) {
 
         {isChild && (
           <div className="mb-4 rounded-lg border border-red-800 bg-red-950/50 px-4 py-3 text-center text-[13px] font-semibold text-red-300">
-            🔒 CHILD ACCOUNT ACTIVE: This node is exclusively for network pairing and encashment. Direct referrals, product purchases, and profile management are handled by your Mother Account. You may purchase a package and upgrade this Child Account under Profile ⬆️.
+            🔒 CHILD ACCOUNT ACTIVE: This node is exclusively for network pairing and encashment. Direct referrals, product purchases, and profile management are handled by your Mother Account. Child Accounts cannot upgrade; please use the Mother Account.
           </div>
         )}
 
@@ -1310,7 +1310,7 @@ function ProfileTab(props: MemberPortalProps & { post: PostFn; busy: boolean }) 
             <div className="flex justify-between"><span className="text-zinc-500">Name</span><strong>{user.first_name} {user.last_name}</strong></div>
             <div className="flex justify-between"><span className="text-zinc-500">Current Rank</span><strong className="text-gold">{user.rank}</strong></div>
           </div>
-          <p className="mt-3 text-[12px] text-zinc-500">Profile details and other settings for this node are managed through your Mother Account. You can upgrade this Child Account's package below using a Premium/StarPremium code from this Child Account's own vault.</p>
+          <p className="mt-3 text-[12px] text-zinc-500">Profile details and other settings for this node are managed through your Mother Account. Child Accounts cannot upgrade.</p>
         </div>
         {upgradeCard ?? (
           <div className="card">

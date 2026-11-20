@@ -11,7 +11,7 @@ import { auditLog } from './engine/accounts';
 
 export const BACKUP_MAGIC = 'MJPREMIUM_MLM_BACKUP';
 
-const TABLES = ['users', 'accounts', 'pins', 'ledger', 'orders', 'packages', 'audit_logs', 'settings', 'commission_review', 'pairing_review', 'commission_event_targets', 'pairing_tracking_meta', 'pairing_contributions', 'pairing_allocations'] as const;
+const TABLES = ['users', 'accounts', 'pins', 'ledger', 'orders', 'packages', 'audit_logs', 'settings', 'commission_review', 'pairing_review', 'commission_event_targets', 'pairing_tracking_meta', 'pairing_contributions', 'pairing_upgrade_contributions', 'pairing_allocations'] as const;
 
 export interface BackupFile {
   magic: string;
@@ -32,7 +32,7 @@ export async function buildBackup(): Promise<BackupFile> {
     }
     return {
       magic: BACKUP_MAGIC,
-      backup_version: 1,
+      backup_version: 2,
       app: 'mjpremium-mlm (next)',
       created_at: phFormat(new Date(), 'Y-m-d H:i:s'),
       tables,
@@ -77,9 +77,19 @@ export async function restoreBackup(
   if (metadata.some(t => t in backup.tables) && metadata.some(t => !Array.isArray(backup.tables[t]))) {
     return { ok: false, error: 'Backup has incomplete commission metadata. Nothing was restored.' };
   }
+  if (Number(backup.backup_version) >= 2 && !Array.isArray(backup.tables.pairing_upgrade_contributions)) {
+    return { ok: false, error: 'Backup is missing upgrade provenance. Nothing was restored.' };
+  }
+  if ('pairing_upgrade_contributions' in backup.tables && !Array.isArray(backup.tables.pairing_upgrade_contributions)) {
+    return { ok: false, error: 'Invalid upgrade provenance. Nothing was restored.' };
+  }
+  if (!('pairing_upgrade_contributions' in backup.tables) && (backup.tables.pairing_allocations ?? []).some(
+    row => row.left_event_kind === 'upgrade' || row.center_event_kind === 'upgrade'
+  )) return { ok: false, error: 'Backup is missing upgrade provenance. Nothing was restored.' };
   return tx(async () => {
   // Wipe everything except the admin gateway user (ID 1) and its usermeta.
   await exec(`DELETE FROM pairing_allocations`);
+  await exec(`DELETE FROM pairing_upgrade_contributions`);
   await exec(`DELETE FROM pairing_contributions`);
   await exec(`DELETE FROM pairing_tracking_meta`);
   await exec(`DELETE FROM commission_event_targets`);
@@ -110,6 +120,7 @@ export async function restoreBackup(
   stats.pairing_tracking_meta = await insertRows('pairing_tracking_meta', backup.tables.pairing_tracking_meta ?? [], false);
   if (!stats.pairing_tracking_meta) await exec('INSERT INTO pairing_tracking_meta(id) VALUES(1) ON CONFLICT(id) DO NOTHING');
   stats.pairing_contributions = await insertRows('pairing_contributions', backup.tables.pairing_contributions ?? [], false);
+  stats.pairing_upgrade_contributions = await insertRows('pairing_upgrade_contributions', backup.tables.pairing_upgrade_contributions ?? [], false);
   stats.pairing_allocations = await insertRows('pairing_allocations', backup.tables.pairing_allocations ?? [], false);
 
   // Keep sequences ahead of restored ids.

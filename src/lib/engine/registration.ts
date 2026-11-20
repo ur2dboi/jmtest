@@ -22,7 +22,7 @@ import {
   syncFreeAccountKindMeta,
   userById,
 } from './accounts';
-import { calcDrBonus, finalizeNewAccountStructure, insertLedger, payDirectReferral, processPointUpflow } from './pairing';
+import { calcDrBonus, finalizeNewAccountStructure, insertLedger, payDirectReferral, processPointUpflow, processUpgradeDifferential } from './pairing';
 import {
   getStrictPlacement,
   rSlotLabel,
@@ -600,6 +600,10 @@ async function upgradeRankInternal(
     // A Starter Mother Account upgrading starts contributing points upline.
     // A Child Account upgrade must not add points or re-evaluate any upline.
     for (const a of accounts) if (!isCA(a.account_type)) await processPointUpflow(Number(a.id), Number(userId));
+  }
+  if (!isStarterRank(from) && rankIndex(from) === 1 && rankIndex(to) === 2) {
+    const upgradeTime = new Date();
+    for (const a of accounts) await processUpgradeDifferential(Number(a.id),Number(userId),upgradeTime);
   }
   if (pin) {
     if (!(await consumePin(Number(pin.id), Number(userId), actor?.role === 'admin' ? 'admin' : 'member', actor?.id ?? 0))) throw new Error('Upgrade code was already used.');

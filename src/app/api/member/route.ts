@@ -195,8 +195,8 @@ export async function POST(req: Request) {
 
     /* ---------------- upgrade account ---------------- */
     if (action === 'upgrade') {
-      // Child Accounts may upgrade their own node (e.g. Starter CA -> Premium);
-      // the code must come from the Child Account's own vault (purchaser check below).
+      // PHP rule: a Child Account cannot self-upgrade.
+      if (loggedInAsChild) return fail('Child Accounts cannot upgrade. Please log in to the Mother Account.');
       const pin = await one<PinRow>(
         `SELECT * FROM pins WHERE id=$1 AND purchaser_id=$2 AND status='unused' AND is_product=0`,
         [Number(b.pin_id), user.id],
@@ -212,10 +212,10 @@ export async function POST(req: Request) {
     /* ---------------- orders ---------------- */
     if (action === 'order') {
       const type = String(b.type ?? 'package');
-      // Child Accounts may purchase PACKAGES only (to upgrade their own
-      // node); product/LP purchases stay with the Mother Account.
+      // Preserve the existing package-only order permission. A Child login
+      // cannot upgrade itself; product/LP purchases stay with the Mother Account.
       if (loggedInAsChild && type !== 'package') {
-        return fail('Child Accounts may only purchase packages for account upgrade. Product purchases are done via the Mother Account.');
+        return fail('Child Accounts may only purchase packages. Product purchases are done via the Mother Account.');
       }
       const itemId = Number(b.item_id ?? 0);
       const qty = Math.max(1, Number(b.qty ?? 1));

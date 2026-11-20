@@ -376,6 +376,9 @@ export async function POST(req: Request) {
       ];
       const out: Record<string, string> = {};
       for (const k of numKeys) if (v[k] !== undefined) out[k] = String(Number(v[k]) || 0);
+      // PHP final rule is fixed even if a stale UI/client posts an old setting.
+      out.mlm_sys_rpts_premium = '1';
+      out.mlm_sys_rpts_starpremium = '1';
       for (let i = 1; i <= 10; i++) {
         const k = `mlm_sys_uni_l${i}`;
         if (v[k] !== undefined) out[k] = String(Number(v[k]) || 0);

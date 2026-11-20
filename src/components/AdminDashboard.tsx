@@ -1330,7 +1330,7 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
     dr_starter: v.mlm_sys_dr_starter ?? '50', dr_premium: v.mlm_sys_dr_premium ?? '300', dr_star: v.mlm_sys_dr_starpremium ?? '1000',
     starter_prod_comm: v.mlm_sys_product_comm_starter ?? '20',
     bp_amount: v.mlm_sys_bp_amount ?? '200', tri_premium: v.mlm_sys_tri_premium ?? '300',
-    rpts_premium: v.mlm_sys_rpts_premium ?? '1', rpts_star: v.mlm_sys_rpts_starpremium ?? '2',
+    rpts_premium: '1', rpts_star: '1',
     lim_premium: v.mlm_sys_limit_premium ?? '15', lim_star: v.mlm_sys_limit_starpremium ?? '30',
     lim_ca_premium: v.mlm_sys_limit_ca_premium ?? '10', lim_ca_star: v.mlm_sys_limit_ca_starpremium ?? '20',
     gc_every: v.mlm_sys_gc_every ?? '5', max_depth: v.mlm_sys_max_depth ?? '8',
@@ -1422,8 +1422,7 @@ function SettingsTab(props: AdminProps & { post: PostFn; busy: boolean }) {
               <div className="mt-2 space-y-2">
                 {numField('Binary Pair A+B Amount (₱)', 'bp_amount')}
                 {numField('Tri-Leg C Bonus per Unit (₱)', 'tri_premium')}
-                {numField('C/Right-Leg Points per Premium Member', 'rpts_premium', '1')}
-                {numField('C/Right-Leg Points per StarPremium Member', 'rpts_star', '1')}
+                <p className="text-[11px] text-zinc-500">Each Premium or StarPremium Right-leg member supplies one trigger.</p>
               </div>
               <p className="text-[11px] text-zinc-500">Premium receiver = 1 unit × this amount. StarPremium receiver + StarPremium source = 2 units × this amount (e.g. ₱300 × 2 = ₱600).</p>
             </div>
@@ -1547,7 +1546,7 @@ function InstructionsTab() {
     ['1. Account Types & Packages', [
       'Starter / ₱388: ₱50 Direct Referral on any sponsored package (Starter, Premium or StarPremium). No pairing points, no A+B, no Tri-Leg, no GC, no unilevel — until upgraded to Premium or StarPremium, when pairing points start counting (no DR on the upgrade itself).',
       'Premium: 1 point on A/B side, 1 point on C/right side; normal A+B and Tri-Leg participation.',
-      'StarPremium: 3 points on A/B side, 2 points on C/right side; may receive two ₱300 Tri-Leg units when paired with a StarPremium right-source.',
+      'StarPremium: 3 points on A/B side, 1 trigger on C/right side; may receive two ₱300 Tri-Leg units when paired with a StarPremium right-source.',
       'Mother Account (MA): a normal member node that can build genealogy. A Free Mother Account uses the same structure and spillover, with earning restrictions set by Admin.',
       'Child Account (CA): optional C1/C2/C3 separate user nodes under the Mother Account. A Free Child Account uses the same child structure.',
     ]],
@@ -1570,7 +1569,7 @@ function InstructionsTab() {
       'Unmatched strong-leg points stay waiting — no total flush-out. Daily caps flush only matched excess.',
     ]],
     ['5. Tri-Leg / Right-Leg Bonus', [
-      'Triggers from completed A+B triggers plus C/Right-leg points (Premium = 1 point, StarPremium = 2 points per right-leg member).',
+      'Triggers from completed A+B triggers plus C/Right-leg points (one trigger per Premium or StarPremium right-leg member).',
       'Premium receiver = ₱300/unit. StarPremium receiver + StarPremium right-source = ₱300 + ₱300.',
       'Every Nth Tri-Leg unit gives 1 GC instead of cash. Daily limits: MA 15/30, CA 10/20 (GC included). Reset 12:01 AM PH time.',
     ]],
@@ -1582,7 +1581,7 @@ function InstructionsTab() {
       'With Cutoff Hold ON, unilevel is visible immediately but withdrawable only after the monthly cutoff.',
     ]],
     ['7. Admin Operations', [
-      'Batch Recalculate replays all earnings from the persisted tree + used pins (DR → pairing → unilevel → wallets). Run it after any manual tree surgery.',
+      'Historical balances without source provenance are held for review; destructive earnings rebuilds are disabled.',
       'Network Override moves must follow the target tree\'s spillover rules; illegal placements are blocked.',
       'Backup/Restore exports members, genealogy, pins, ledger, orders, packages, settings and logs. Admin ID 1 is always preserved.',
       'Activity Logs hide password fields and record actions by category.',
