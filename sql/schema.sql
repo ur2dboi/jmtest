@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS pairing_contributions (
 ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS ab_consumed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS right_consumed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS review_required BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS recipient_eligible BOOLEAN;
 CREATE INDEX IF NOT EXISTS idx_pair_contribution_leg ON pairing_contributions(recipient_account_id,leg,occurred_at,source_account_id);
 CREATE TABLE IF NOT EXISTS pairing_upgrade_contributions (
   recipient_account_id BIGINT NOT NULL, source_account_id BIGINT NOT NULL, source_user_id BIGINT NOT NULL,
@@ -173,6 +174,7 @@ CREATE TABLE IF NOT EXISTS pairing_upgrade_contributions (
   occurred_at TIMESTAMPTZ NOT NULL, review_required BOOLEAN NOT NULL DEFAULT FALSE,
   PRIMARY KEY(recipient_account_id,source_account_id)
 );
+ALTER TABLE pairing_upgrade_contributions ADD COLUMN IF NOT EXISTS recipient_eligible BOOLEAN;
 CREATE INDEX IF NOT EXISTS idx_pair_upgrade_leg ON pairing_upgrade_contributions(recipient_account_id,leg,occurred_at,source_account_id);
 CREATE TABLE IF NOT EXISTS pairing_allocations (
   id BIGSERIAL PRIMARY KEY, recipient_account_id BIGINT NOT NULL, kind TEXT NOT NULL,

@@ -105,7 +105,7 @@ export async function tx<T>(
     await client.query('BEGIN');
     // Recognised by the production cutover fence; scoped to this transaction
     // so a pooled connection cannot accidentally grant the old application access.
-    await client.query("SELECT set_config('mjp.pairing_version','2',true)");
+    await client.query("SELECT set_config('mjp.pairing_version','3',true)");
     const out = await transactionContext.run(client, () => fn(client));
     const committed = await client.query('COMMIT');
     if (committed.command !== 'COMMIT') throw new Error('Transaction was aborted and could not be committed.');

@@ -130,6 +130,7 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS ab_consumed INTEGER NOT NULL DEFAULT 0`);
     await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS right_consumed INTEGER NOT NULL DEFAULT 0`);
     await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS review_required BOOLEAN NOT NULL DEFAULT FALSE`);
+    await exec(`ALTER TABLE pairing_contributions ADD COLUMN IF NOT EXISTS recipient_eligible BOOLEAN`);
     await exec(`CREATE INDEX IF NOT EXISTS idx_pair_contribution_leg ON pairing_contributions(recipient_account_id,leg,occurred_at,source_account_id)`);
     // A rank upgrade is a distinct time-stamped event, not a mutation of the
     // original source. One Premium-to-Star differential per source/recipient.
@@ -140,6 +141,7 @@ export async function ensureSchemaUpgrades(): Promise<void> {
       occurred_at TIMESTAMPTZ NOT NULL, review_required BOOLEAN NOT NULL DEFAULT FALSE,
       PRIMARY KEY(recipient_account_id,source_account_id)
     )`);
+    await exec(`ALTER TABLE pairing_upgrade_contributions ADD COLUMN IF NOT EXISTS recipient_eligible BOOLEAN`);
     await exec(`CREATE INDEX IF NOT EXISTS idx_pair_upgrade_leg ON pairing_upgrade_contributions(recipient_account_id,leg,occurred_at,source_account_id)`);
     await exec(`CREATE TABLE IF NOT EXISTS pairing_allocations (
       id BIGSERIAL PRIMARY KEY, recipient_account_id BIGINT NOT NULL, kind TEXT NOT NULL,

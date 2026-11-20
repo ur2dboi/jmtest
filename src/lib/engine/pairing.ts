@@ -1,7 +1,7 @@
 import { exec, one, q, scalar, tx } from '../db';
 import { phFormat, phPairingDayWindow } from '../time';
 import { settingInt, settingNum } from '../settings';
-import type { AccountRow, LedgerStatus, LedgerType, Position } from '../types';
+import type { AccountRow, LedgerStatus, LedgerType, Position, UserRow } from '../types';
 import {
   accountById,
   accountRankSnapshot,
@@ -14,6 +14,7 @@ import {
   isStarRank,
   isStarterRank,
   memberDisplayRank,
+  parseRankHistory,
   setAccountDepth,
   subtreeByDepth,
   syncFreeAccountKindMeta,
@@ -134,6 +135,29 @@ async function safelyAdvancePairingTime(userId: number, earlier: Date, later: Da
   return !alreadyIssued;
 }
 
+/** Unknown pre-fix event eligibility is never silently paid. */
+function recipientEventEligibility(owner: UserRow | null, event: { recipient_eligible: boolean | null; occurred_at: Date }): boolean | null {
+  if (event.recipient_eligible !== null) return event.recipient_eligible;
+  const history = parseRankHistory(owner).slice().sort((a,b) =>
+    new Date(a.upgraded_at).getTime() - new Date(b.upgraded_at).getTime());
+  const valid = history.length > 0 && history.every((h,i) =>
+    !!h.old_rank && !!h.new_rank && Number.isFinite(new Date(h.upgraded_at).getTime()) &&
+    (i === 0 || (new Date(history[i-1].upgraded_at).getTime() < new Date(h.upgraded_at).getTime() &&
+      history[i-1].new_rank.toLowerCase() === h.old_rank.toLowerCase()))) &&
+    history[history.length-1].new_rank.toLowerCase() === String(owner?.rank || '').toLowerCase();
+  if (!valid) return null;
+  const when = new Date(event.occurred_at).getTime();
+  if (!Number.isFinite(when)) return null;
+  let rankAtEvent = history[0].old_rank;
+  for (const h of history) {
+    const upgraded = new Date(h.upgraded_at).getTime();
+    if (when === upgraded) return null;
+    if (when < upgraded) break;
+    rankAtEvent = h.new_rank;
+  }
+  return !isStarterRank(rankAtEvent);
+}
+
 /* =====================================================================
  * POINT UPFLOW
  * ===================================================================== */
@@ -183,9 +207,9 @@ async function processPointUpflowInternal(
     );
     const isDirectChild = nodeId === currentNodeId;
 
-    // As in the supplied PHP, points can accumulate while a recipient is
-    // Starter; evaluatePairs does not pay it until it has an eligible rank.
-    if (uplineOwnerId !== origin) {
+    // User rule: events received while a recipient is Starter never earn pairing.
+    if (uplineOwnerId !== origin) await one('SELECT id FROM users WHERE id=$1 FOR SHARE',[uplineOwnerId]);
+    if (uplineOwnerId !== origin && !isStarterRank(await getUserRankAt(uplineOwnerId, eventTime))) {
       if (!isDirectChild) {
         const column = leg === 'L' ? 'left_points' : leg === 'C' ? 'center_points' : 'right_points';
         const delta = leg === 'R' ? rPointsToAdd : pointsToAdd;
@@ -198,8 +222,8 @@ async function processPointUpflowInternal(
         const outOfOrder = !!latestTime && latestTime.getTime()>eventTime.getTime() &&
           !(await safelyAdvancePairingTime(uplineOwnerId,eventTime,latestTime));
         const recorded = await one<{ source_account_id: number }>(
-          `INSERT INTO pairing_contributions(recipient_account_id,source_account_id,source_user_id,leg,source_rank,ab_points,right_points,occurred_at,review_required)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(recipient_account_id,source_account_id) DO NOTHING RETURNING source_account_id`,
+          `INSERT INTO pairing_contributions(recipient_account_id,source_account_id,source_user_id,leg,source_rank,ab_points,right_points,occurred_at,review_required,recipient_eligible)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE) ON CONFLICT(recipient_account_id,source_account_id) DO NOTHING RETURNING source_account_id`,
           [uplineId,nodeId,origin,leg,rank,pointsToAdd,rPointsToAdd,eventTime,outOfOrder]);
         if (recorded) await exec(`UPDATE accounts SET ${column} = ${column} + $1 WHERE id = $2`, [delta, uplineId]);
         if (recorded && outOfOrder) await exec(`INSERT INTO pairing_review(account_id,reason)
@@ -228,10 +252,13 @@ export async function processUpgradeDifferential(nodeId: number, originUserId: n
       const recipient = Number(current.upline_id);
       const owner = Number((await scalar<number>('SELECT user_id FROM accounts WHERE id=$1',[recipient])) ?? 0);
       const leg = current.position;
-      if (owner !== Number(originUserId) && cursor !== Number(nodeId) && (leg === 'L' || leg === 'C')) {
+      if (owner !== Number(originUserId)) await one('SELECT id FROM users WHERE id=$1 FOR SHARE',[owner]);
+      if (owner !== Number(originUserId) && cursor !== Number(nodeId) && (leg === 'L' || leg === 'C') && !isStarterRank(await getUserRankAt(owner,eventTime))) {
         await one('SELECT id FROM accounts WHERE id=$1 FOR UPDATE',[recipient]);
-        const base = await one<{leg:Position;review_required:boolean}>(
-          'SELECT leg,review_required FROM pairing_contributions WHERE recipient_account_id=$1 AND source_account_id=$2',[recipient,nodeId]);
+        const base = await one<{leg:Position;review_required:boolean;recipient_eligible:boolean|null;occurred_at:Date}>(
+          'SELECT leg,review_required,recipient_eligible,occurred_at FROM pairing_contributions WHERE recipient_account_id=$1 AND source_account_id=$2',[recipient,nodeId]);
+        const baseEligible = base ? recipientEventEligibility(await userById(owner),base) : null;
+        if (baseEligible === false) { cursor=recipient; continue; }
         const latest = await one<{when:Date|null}>(`SELECT MAX(occurred_at) AS "when" FROM (
           SELECT occurred_at FROM pairing_contributions WHERE recipient_account_id=$1
           UNION ALL SELECT occurred_at FROM pairing_upgrade_contributions WHERE recipient_account_id=$1) events`,[recipient]);
@@ -239,10 +266,10 @@ export async function processUpgradeDifferential(nodeId: number, originUserId: n
         const outOfOrder = !!later && later.getTime()>eventTime.getTime() && !(await safelyAdvancePairingTime(owner,eventTime,later));
         // Missing/changed base history or an order ambiguity must be reviewed,
         // not silently credited. The aggregate points are still preserved.
-        const held = !base || base.leg !== leg || base.review_required || outOfOrder;
+        const held = !base || base.leg !== leg || base.review_required || baseEligible !== true || outOfOrder;
         const added = await one<{source_account_id:number}>(`INSERT INTO pairing_upgrade_contributions
-          (recipient_account_id,source_account_id,source_user_id,leg,ab_points,occurred_at,review_required)
-          VALUES($1,$2,$3,$4,2,$5,$6) ON CONFLICT(recipient_account_id,source_account_id) DO NOTHING RETURNING source_account_id`,
+          (recipient_account_id,source_account_id,source_user_id,leg,ab_points,occurred_at,review_required,recipient_eligible)
+          VALUES($1,$2,$3,$4,2,$5,$6,TRUE) ON CONFLICT(recipient_account_id,source_account_id) DO NOTHING RETURNING source_account_id`,
           [recipient,nodeId,originUserId,leg,eventTime,held]);
         if (added) {
           await exec(`UPDATE accounts SET ${leg === 'L' ? 'left_points' : 'center_points'} = ${leg === 'L' ? 'left_points' : 'center_points'} + 2 WHERE id=$1`,[recipient]);
@@ -345,14 +372,21 @@ async function evaluatePairsLocked(accountId: number, sourceUserId = 0, eventTim
   // reconstructed from aggregate points or ledger prose. Keep them untouched,
   // flag them, and spend only point units with immutable new source records.
   type Contribution = { source_account_id: number; source_user_id: number; leg: Position; source_rank: string;
-    ab_points: number; right_points: number; ab_consumed: number; right_consumed: number; review_required: boolean; occurred_at: Date; event_kind: 'base'|'upgrade' };
+    ab_points: number; right_points: number; ab_consumed: number; right_consumed: number; review_required: boolean; recipient_eligible: boolean | null; occurred_at: Date; event_kind: 'base'|'upgrade' };
   const contributions = await q<Contribution>(
-    `SELECT source_account_id,source_user_id,leg,source_rank,ab_points,right_points,ab_consumed,right_consumed,review_required,occurred_at,'base'::text AS event_kind
+    `SELECT source_account_id,source_user_id,leg,source_rank,ab_points,right_points,ab_consumed,right_consumed,review_required,recipient_eligible,occurred_at,'base'::text AS event_kind
      FROM pairing_contributions WHERE recipient_account_id=$1
-     UNION ALL SELECT source_account_id,source_user_id,leg,'StarPremium',ab_points,0,ab_consumed,0,review_required,occurred_at,'upgrade'::text
+     UNION ALL SELECT source_account_id,source_user_id,leg,'StarPremium',ab_points,0,ab_consumed,0,review_required,recipient_eligible,occurred_at,'upgrade'::text
      FROM pairing_upgrade_contributions WHERE recipient_account_id=$1
      ORDER BY occurred_at,source_account_id,event_kind`, [accountId]);
-  const legRows = (leg: Position) => contributions.filter(x => x.leg === leg && !x.review_required);
+  // New events record eligibility atomically. Older rows lack that proof;
+  // classify them only when coherent rank history establishes the event rank.
+  // Unknown rows are held for review, never silently treated as eligible.
+  const eligibility = (x: Contribution) => recipientEventEligibility(owner, x);
+  if (contributions.some(x => eligibility(x) === null)) {
+    await exec(`INSERT INTO pairing_review(account_id,reason) VALUES($1,'Pre-fix contribution has unverified recipient rank at the event; held for manual review.') ON CONFLICT(account_id) DO NOTHING`,[accountId]);
+  }
+  const legRows = (leg: Position) => contributions.filter(x => x.leg === leg && !x.review_required && eligibility(x) === true);
   const remainingAb = (x: Contribution) => Number(x.ab_points) - Number(x.ab_consumed);
   const remainingR = (x: Contribution) => Number(x.right_points) - Number(x.right_consumed);
   const sumRemainingAb = (leg: Position) => legRows(leg).reduce((sum,x) => sum+remainingAb(x),0);
